@@ -1,0 +1,49 @@
+{
+  "name": "electron-xpc",
+  "version": "1.0.1",
+  "description": "Cross-process communication control for electron-vite projects",
+  "main": "./dist/main/index.js",
+  "module": "./dist/main/index.mjs",
+  "types": "./dist/main/index.d.ts",
+  "exports": {
+    "./main": {
+      "require": {
+        "types": "./dist/main/index.d.ts",
+        "default": "./dist/main/index.js"
+      },
+      "import": {
+        "types": "./dist/main/index.d.mts",
+        "default": "./dist/main/index.mjs"
+      }
+    },
+    "./preload": {
+      "require": {
+        "types": "./dist/preload/index.d.ts",
+        "default": "./dist/preload/index.js"
+      },
+      "import": {
+        "types": "./dist/preload/index.d.mts",
+        "default": "./dist/preload/index.mjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "prepublishOnly": "yarn build"
+  },
+  "dependencies": {
+    "electron": ">=20.0.0",
+    "rig-foundation": ">=1.0.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0"
+  },
+  "repository": "git@github.com:FlashHand/electron-xpc.git",
+  "author": "WangBo <ralwayne@163.com>",
+  "license": "MIT"
+}
