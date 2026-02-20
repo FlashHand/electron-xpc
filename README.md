@@ -22,7 +22,7 @@ npm install electron-xpc
 
 ### electron-xpc是 **Async/Await** 语法风格的跨进程通信库，基于信号量控制的方式开发
 
-不同于 Electron 内置的 `ipcRenderer.invoke` / `ipcMain.handle` 仅支持渲染进程到主进程的请求-响应模式，XPC 允许**任意进程**（渲染进程或主进程）以完整的 `async/await` 语义调用**任意其他进程**中注册的处理器——包括 renderer <-> renderer 和 main <-> renderer 的调用。
+不同于 Electron 内置的 `ipcRenderer.invoke` / `ipcMain.handle` 仅支持渲染进程到主进程的请求-响应模式，XPC 允许**任意进程**（渲染进程或主进程）以完整的 `async/await` 语义调用**任意其他进程**中注册的handler——包括 renderer <-> renderer 和 main <-> renderer 的调用。
 
 **特性：**
 
@@ -30,11 +30,25 @@ npm install electron-xpc
 2. **任意进程间统一的 async/await 语义** — 由于所有跨进程调用均支持 `async/await`，跨多个进程的复杂多步作业流程可以用简洁的顺序逻辑编排，无需深层嵌套回调或手动事件协调。
 
 
+### Process Layers
+
+XPC distinguishes three process layers in an Electron app:
+
+| Layer | Environment | Import Path |
+|-------|-------------|-------------|
+| **Main Layer** | Node.js main process | `electron-xpc/main` |
+| **Preload Layer** | Renderer preload script (has `electron` access) | `electron-xpc/preload` |
+| **Web Layer** | Renderer web page (no `electron` access, uses `window.xpcRenderer`) | `electron-xpc/renderer` |
+
+Although preload belongs to the renderer layer, it contains an isolated Node.js context, so it is treated as a separate layer in the architecture.
+
+---
+
 ## Usage A: Hard-coded send / handle
 
 This is the low-level API where you manually specify channel name strings.
 
-### 1. Initialize XPC Center (Main Layer)
+### 1. Initialize XPC Center in Main Process (Required)
 
 ```ts
 // src/main/index.ts
@@ -195,20 +209,6 @@ await notifyEmitter.showToast({ text: 'Hello!' });
 ---
 
 ## Architecture
-
-### Process Layers
-
-XPC distinguishes three process layers in an Electron app:
-
-| Layer | Environment | Import Path |
-|-------|-------------|-------------|
-| **Main Layer** | Node.js main process | `electron-xpc/main` |
-| **Preload Layer** | Renderer preload script (has `electron` access) | `electron-xpc/preload` |
-| **Web Layer** | Renderer web page (no `electron` access, uses `window.xpcRenderer`) | `electron-xpc/renderer` |
-
-Although preload belongs to the renderer layer, it contains an isolated Node.js context, so it is treated as a separate layer in the architecture.
-
----
 
 ### Communication Flow
 

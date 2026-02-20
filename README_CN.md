@@ -2,7 +2,7 @@
 
 **Async/Await** 语法风格的跨进程通信库，基于信号量控制的方式开发。
 
-不同于 Electron 内置的 `ipcRenderer.invoke` / `ipcMain.handle` 仅支持渲染进程到主进程的请求-响应模式，XPC 允许**任意进程**（渲染进程或主进程）以完整的 `async/await` 语义调用**任意其他进程**中注册的处理器——包括 `renderer <-> renderer` 和 `main <-> renderer` 的调用。
+不同于 Electron 内置的 `ipcRenderer.invoke` / `ipcMain.handle` 仅支持渲染进程到主进程的请求-响应模式，XPC 允许**任意进程**（渲染进程或主进程）以完整的 `async/await` 语义调用**任意其他进程**中注册的handler——包括 `renderer <-> renderer` 和 `main <-> renderer` 的调用。
 
 ## 安装
 
@@ -17,11 +17,25 @@ npm install electron-xpc
 1. **将工作分配到渲染进程** — 可以将耗时或阻塞性任务委托到渲染进程中执行，保持主进程的响应性，降低主进程的性能开销。
 2. **任意进程间统一的 async/await 语义** — 由于所有跨进程调用均支持 `async/await`，跨多个进程的复杂多步作业流程可以用简洁的顺序逻辑编排，无需深层嵌套回调或手动事件协调。
 
+## 进程层级说明
+
+XPC 将 Electron 应用中的进程分为三个层级：
+
+| 层级 | 运行环境 | 导入路径 |
+|------|----------|----------|
+| **Main Layer（主进程层）** | Node.js 主进程 | `electron-xpc/main` |
+| **Preload Layer（预加载层）** | 渲染进程的 preload 脚本（可访问 `electron`） | `electron-xpc/preload` |
+| **Web Layer（网页层）** | 渲染进程的网页（无 `electron` 访问，通过 `window.xpcRenderer`） | `electron-xpc/renderer` |
+
+虽然preload属于渲染层,但是由于Preload包含了isolated nodejs context,所以架构上做了区分
+
+---
+
 ## 用法 A：硬编码 send / handle
 
 这是底层 API，需要手动指定通道名称字符串。
 
-### 1. 初始化 XPC Center（Main Layer）
+### 1. 在主进程初始化 XPC Center(必须)
 
 ```ts
 // src/main/index.ts
@@ -35,13 +49,13 @@ xpcCenter.init();
 ```ts
 import { xpcMain } from 'electron-xpc/main';
 
-// 注册处理器
+// 注册handler
 xpcMain.handle('my/mainChannel', async (payload) => {
   console.log('主进程收到:', payload.params);
   return { message: '来自主进程的问候' };
 });
 
-// 发送到任意已注册的处理器（主进程或渲染进程）
+// 发送到任意已注册的handler（主进程或渲染进程）
 const result = await xpcMain.send('my/channel', { foo: 'bar' });
 ```
 
@@ -51,13 +65,13 @@ const result = await xpcMain.send('my/channel', { foo: 'bar' });
 // Preload 脚本 — 可直接访问 electron
 import { xpcRenderer } from 'electron-xpc/preload';
 
-// 注册处理器
+// 注册handler
 xpcRenderer.handle('my/channel', async (payload) => {
   console.log('收到参数:', payload.params);
   return { message: '来自 preload 的问候' };
 });
 
-// 发送到其他处理器
+// 发送到其他handler
 const result = await xpcRenderer.send('other/channel', { foo: 'bar' });
 ```
 
@@ -67,16 +81,16 @@ const result = await xpcRenderer.send('other/channel', { foo: 'bar' });
 // 网页 — 无 electron 访问，使用 window.xpcRenderer
 import { xpcRenderer } from 'electron-xpc/renderer';
 
-// 注册处理器
+// 注册handler
 xpcRenderer.handle('my/webChannel', async (payload) => {
   return { message: '来自网页的问候' };
 });
 
-// 发送到其他处理器
+// 发送到其他handler
 const result = await xpcRenderer.send('my/channel', { foo: 'bar' });
 ```
 
-### 5. 移除处理器
+### 5. 移除handler
 
 ```ts
 xpcRenderer.removeHandle('my/channel');
@@ -182,20 +196,6 @@ await notifyEmitter.showToast({ text: 'Hello!' });
 ---
 
 ## 架构
-
-### 进程层级说明
-
-XPC 将 Electron 应用中的进程分为三个层级：
-
-| 层级 | 运行环境 | 导入路径 |
-|------|----------|----------|
-| **Main Layer（主进程层）** | Node.js 主进程 | `electron-xpc/main` |
-| **Preload Layer（预加载层）** | 渲染进程的 preload 脚本（可访问 `electron`） | `electron-xpc/preload` |
-| **Web Layer（网页层）** | 渲染进程的网页（无 `electron` 访问，通过 `window.xpcRenderer`） | `electron-xpc/renderer` |
-
-虽然preload属于渲染层,但是由于Preload包含了isolated nodejs context,所以架构上做了区分
-
----
 
 ### 通信流程
 
