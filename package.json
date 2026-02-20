@@ -1,0 +1,68 @@
+{
+  "name": "electron-xpc",
+  "version": "1.0.0",
+  "description": "Type-safe cross-process communication for Electron (main ↔ preload ↔ renderer)",
+  "exports": {
+    "./main": {
+      "require": {
+        "types": "./dist/main/index.d.ts",
+        "default": "./dist/main/index.js"
+      },
+      "import": {
+        "types": "./dist/main/index.d.mts",
+        "default": "./dist/main/index.mjs"
+      }
+    },
+    "./preload": {
+      "require": {
+        "types": "./dist/preload/index.d.ts",
+        "default": "./dist/preload/index.js"
+      },
+      "import": {
+        "types": "./dist/preload/index.d.mts",
+        "default": "./dist/preload/index.mjs"
+      }
+    },
+    "./renderer": {
+      "require": {
+        "types": "./dist/renderer/index.d.ts",
+        "default": "./dist/renderer/index.js"
+      },
+      "import": {
+        "types": "./dist/renderer/index.d.mts",
+        "default": "./dist/renderer/index.mjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "prepublishOnly": "yarn build",
+    "publish:npm": "npm publish --registry=https://registry.npmjs.org/"
+  },
+  "peerDependencies": {
+    "electron": ">=20.0.0",
+    "rig-foundation": ">=1.0.0"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0"
+  },
+  "repository": "git@github.com:FlashHand/electron-xpc.git",
+  "author": "WangBo <ralwayne@163.com>",
+  "license": "MIT",
+  "keywords": [
+    "electron",
+    "ipc",
+    "xpc",
+    "cross-process",
+    "async/await",
+    "renderer to renderer"
+  ]
+}
