@@ -7,13 +7,27 @@ import { xpcRenderer } from './xpcRenderer.helper';
  * Subclass this and define async methods — they will be auto-registered
  * as xpc handlers with channel `xpc:ClassName/methodName`.
  *
+ * Methods are ignored if:
+ * 1. Name starts with `_` or `$` (private method convention)
+ * 2. Marked with @xpcIgnore decorator
+ *
  * Example:
  * ```ts
- * class UserTable extends XpcRendererHandler {
- *   async getUserList(params?: any): Promise<any> { ... }
+ * // In renderer process — register handler:
+ * class UINotification extends XpcRendererHandler {
+ *   async showToast(params?: any): Promise<void> { ... } // registered
+ *   
+ *   async _helperMethod(): Promise<void> { ... } // NOT registered
+ *   
+ *   @xpcIgnore
+ *   async internalMethod(): Promise<void> { ... } // NOT registered
  * }
- * const userTable = new UserTable();
- * // auto-registers handler for 'xpc:UserTable/getUserList'
+ * const uiNotification = new UINotification();
+ *
+ * // In preload process — call via emitter:
+ * import type { UINotification } from '@renderer/uiNotification.handler';
+ * const emitter = createXpcPreloadEmitter<UINotification>('UINotification');
+ * await emitter.showToast({ text: 'Hello!' });
  * ```
  */
 export class XpcRendererHandler {

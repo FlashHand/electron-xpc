@@ -7,13 +7,27 @@ import { xpcRenderer } from './xpcPreload.helper';
  * Subclass this and define async methods — they will be auto-registered
  * as xpc handlers with channel `xpc:ClassName/methodName`.
  *
+ * Methods are ignored if:
+ * 1. Name starts with `_` or `$` (private method convention)
+ * 2. Marked with @xpcIgnore decorator
+ *
  * Example:
  * ```ts
- * class UserTable extends XpcPreloadHandler {
- *   async getUserList(params?: any): Promise<any> { ... }
+ * // In preload process — register handler:
+ * class MessageTable extends XpcPreloadHandler {
+ *   async getMessageList(params?: any): Promise<any> { ... } // registered
+ *   
+ *   async _helperMethod(): Promise<void> { ... } // NOT registered
+ *   
+ *   @xpcIgnore
+ *   async internalMethod(): Promise<void> { ... } // NOT registered
  * }
- * const userTable = new UserTable();
- * // auto-registers handler for 'xpc:UserTable/getUserList'
+ * const messageTable = new MessageTable();
+ *
+ * // In main process — call via emitter:
+ * import type { MessageTable } from '@preload/messageTable.handler';
+ * const emitter = createXpcMainEmitter<MessageTable>('MessageTable');
+ * const messages = await emitter.getMessageList({ chatId: '123' });
  * ```
  */
 export class XpcPreloadHandler {

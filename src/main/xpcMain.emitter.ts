@@ -6,14 +6,21 @@ import { xpcMain } from './xpcMain.helper';
  * The emitter mirrors the handler's method signatures, but each call
  * sends a message via xpcMain.send() to `xpc:ClassName/methodName`.
  *
+ * CRITICAL: Always use `import type` to avoid importing actual handler implementation
+ * and its dependencies (e.g., sqlite, node-only modules) into the main process.
+ *
  * Example:
  * ```ts
- * class UserTable extends XpcMainHandler {
- *   async getUserList(params?: any): Promise<any> { ... }
+ * // In preload process:
+ * class MessageTable extends XpcPreloadHandler {
+ *   async getMessageList(params?: any): Promise<any> { ... }
  * }
- * const userTableEmitter = createXpcMainEmitter<UserTable>('UserTable');
- * const list = await userTableEmitter.getUserList({ page: 1 });
- * // sends to 'xpc:UserTable/getUserList'
+ *
+ * // In main process:
+ * import type { MessageTable } from '@preload/messageTable.handler'; // ← type-only import!
+ * const messageEmitter = createXpcMainEmitter<MessageTable>('MessageTable');
+ * const messages = await messageEmitter.getMessageList({ chatId: '123' });
+ * // sends to 'xpc:MessageTable/getMessageList'
  * ```
  */
 export const createXpcMainEmitter = <T>(className: string): XpcEmitterOf<T> => {

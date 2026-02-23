@@ -6,14 +6,21 @@ import { xpcRenderer } from './xpcPreload.helper';
  * The emitter mirrors the handler's method signatures, but each call
  * sends a message via xpcRenderer.send() to `xpc:ClassName/methodName`.
  *
+ * CRITICAL: Always use `import type` to avoid importing actual handler implementation
+ * and its dependencies (e.g., electron main modules) into the preload process.
+ *
  * Example:
  * ```ts
- * class UserTable extends XpcPreloadHandler {
+ * // In main process:
+ * class UserService extends XpcMainHandler {
  *   async getUserList(params?: any): Promise<any> { ... }
  * }
- * const userTableEmitter = createXpcPreloadEmitter<UserTable>('UserTable');
- * const list = await userTableEmitter.getUserList({ page: 1 });
- * // sends to 'xpc:UserTable/getUserList'
+ *
+ * // In preload process:
+ * import type { UserService } from '@main/userService.handler'; // ← type-only import!
+ * const userEmitter = createXpcPreloadEmitter<UserService>('UserService');
+ * const list = await userEmitter.getUserList({ page: 1 });
+ * // sends to 'xpc:UserService/getUserList'
  * ```
  */
 export const createXpcPreloadEmitter = <T>(className: string): XpcEmitterOf<T> => {

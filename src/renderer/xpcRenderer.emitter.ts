@@ -6,11 +6,18 @@ import { xpcRenderer } from './xpcRenderer.helper';
  * The emitter mirrors the handler's method signatures, but each call
  * sends a message via xpcRenderer.send() to `xpc:ClassName/methodName`.
  *
+ * CRITICAL: Always use `import type` to avoid importing actual handler implementation
+ * and its dependencies (e.g., node-only modules) into the renderer process.
+ *
  * Example:
  * ```ts
- * class UserTable extends XpcRendererHandler {
+ * // In main process:
+ * class UserTable extends XpcMainHandler {
  *   async getUserList(params?: any): Promise<any> { ... }
  * }
+ *
+ * // In renderer process:
+ * import type { UserTable } from '@main/userTable.handler'; // ← type-only import!
  * const userTableEmitter = createXpcRendererEmitter<UserTable>('UserTable');
  * const list = await userTableEmitter.getUserList({ page: 1 });
  * // sends to 'xpc:UserTable/getUserList'
