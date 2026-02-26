@@ -147,6 +147,15 @@ var XpcCenter = class {
 };
 var xpcCenter = new XpcCenter();
 
+// src/shared/xpc.decorator.ts
+var XPC_IGNORE = /* @__PURE__ */ Symbol("xpc:ignore");
+var xpcIgnore = (target, propertyKey) => {
+  const descriptor = Object.getOwnPropertyDescriptor(target, propertyKey);
+  if (descriptor && typeof descriptor.value === "function") {
+    descriptor.value[XPC_IGNORE] = true;
+  }
+};
+
 // src/shared/xpcHandler.type.ts
 var XPC_HANDLER_PREFIX = "xpc:";
 var buildXpcChannel = (className, methodName) => {
@@ -157,8 +166,10 @@ var getHandlerMethodNames = (prototype) => {
   const keys = Object.getOwnPropertyNames(prototype);
   for (const key of keys) {
     if (key === "constructor") continue;
+    if (key.startsWith("_") || key.startsWith("$")) continue;
     const descriptor = Object.getOwnPropertyDescriptor(prototype, key);
     if (descriptor && typeof descriptor.value === "function") {
+      if (descriptor.value[XPC_IGNORE]) continue;
       names.push(key);
     }
   }
@@ -190,6 +201,6 @@ var createXpcMainEmitter = (className) => {
   });
 };
 
-export { XpcMainHandler, XpcTask, createXpcMainEmitter, xpcCenter, xpcMain };
+export { XpcMainHandler, XpcTask, createXpcMainEmitter, xpcCenter, xpcIgnore, xpcMain };
 //# sourceMappingURL=index.mjs.map
 //# sourceMappingURL=index.mjs.map

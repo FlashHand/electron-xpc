@@ -82,13 +82,27 @@ declare class XpcTask implements XpcPayload {
  * Subclass this and define async methods — they will be auto-registered
  * as xpc handlers with channel `xpc:ClassName/methodName`.
  *
+ * Methods are ignored if:
+ * 1. Name starts with `_` or `$` (private method convention)
+ * 2. Marked with @xpcIgnore decorator
+ *
  * Example:
  * ```ts
+ * // In main process — register handler:
  * class UserTable extends XpcMainHandler {
- *   async getUserList(params?: any): Promise<any> { ... }
+ *   async getUserList(params?: any): Promise<any> { ... } // registered
+ *
+ *   async _helperMethod(): Promise<void> { ... } // NOT registered
+ *
+ *   @xpcIgnore
+ *   async internalMethod(): Promise<void> { ... } // NOT registered
  * }
  * const userTable = new UserTable();
- * // auto-registers handler for 'xpc:UserTable/getUserList'
+ *
+ * // In renderer process — call via emitter:
+ * import type { UserTable } from '@main/userTable.handler';
+ * const emitter = createXpcRendererEmitter<UserTable>('UserTable');
+ * const list = await emitter.getUserList({ page: 1 });
  * ```
  */
 declare class XpcMainHandler {
@@ -103,12 +117,19 @@ declare class XpcMainHandler {
  */
 type AssertSingleParam<F> = F extends (...args: any[]) => any ? Parameters<F>['length'] extends 0 | 1 ? F : never : never;
 /**
+ * Filters out keys that start with `_` or `$` (private method convention).
+ */
+type ExcludePrivateKeys<K> = K extends `_${string}` | `$${string}` ? never : K;
+/**
  * Utility type: extracts the method signatures from a handler class,
  * turning each method into an emitter-compatible signature.
  * Methods with 2+ parameters are mapped to `never`, causing a compile error on use.
+ * Methods with `_` or `$` prefix are excluded from the emitter type.
+ * Methods marked with @xpcIgnore are excluded at runtime; use `_`/`$` prefix
+ * to also exclude them from the type-level emitter.
  */
 type XpcEmitterOf<T> = {
-    [K in keyof T as T[K] extends (...args: any[]) => any ? K : never]: AssertSingleParam<T[K]> extends never ? never : T[K] extends (params: infer P) => any ? Parameters<T[K]>['length'] extends 0 ? () => Promise<any> : (params: P) => Promise<any> : () => Promise<any>;
+    [K in keyof T as T[K] extends (...args: any[]) => any ? ExcludePrivateKeys<K> : never]: AssertSingleParam<T[K]> extends never ? never : T[K] extends (params: infer P) => any ? Parameters<T[K]>['length'] extends 0 ? () => Promise<any> : (params: P) => Promise<any> : () => Promise<any>;
 };
 
 /**
@@ -116,16 +137,38 @@ type XpcEmitterOf<T> = {
  * The emitter mirrors the handler's method signatures, but each call
  * sends a message via xpcMain.send() to `xpc:ClassName/methodName`.
  *
+ * CRITICAL: Always use `import type` to avoid importing actual handler implementation
+ * and its dependencies (e.g., sqlite, node-only modules) into the main process.
+ *
  * Example:
  * ```ts
- * class UserTable extends XpcMainHandler {
- *   async getUserList(params?: any): Promise<any> { ... }
+ * // In preload process:
+ * class MessageTable extends XpcPreloadHandler {
+ *   async getMessageList(params?: any): Promise<any> { ... }
  * }
- * const userTableEmitter = createXpcMainEmitter<UserTable>('UserTable');
- * const list = await userTableEmitter.getUserList({ page: 1 });
- * // sends to 'xpc:UserTable/getUserList'
+ *
+ * // In main process:
+ * import type { MessageTable } from '@preload/messageTable.handler'; // ← type-only import!
+ * const messageEmitter = createXpcMainEmitter<MessageTable>('MessageTable');
+ * const messages = await messageEmitter.getMessageList({ chatId: '123' });
+ * // sends to 'xpc:MessageTable/getMessageList'
  * ```
  */
 declare const createXpcMainEmitter: <T>(className: string) => XpcEmitterOf<T>;
 
-export { type XpcEmitterOf, XpcMainHandler, type XpcPayload, XpcTask, createXpcMainEmitter, xpcCenter, xpcMain };
+/**
+ * Decorator to mark a method as ignored for xpc handler auto-registration.
+ *
+ * Usage:
+ * ```ts
+ * class UserService extends XpcMainHandler {
+ *   async getUserList(): Promise<any> { ... } // will be registered
+ *
+ *   @xpcIgnore
+ *   async helperMethod(): Promise<void> { ... } // will NOT be registered
+ * }
+ * ```
+ */
+declare const xpcIgnore: (target: any, propertyKey: string) => void;
+
+export { type XpcEmitterOf, XpcMainHandler, type XpcPayload, XpcTask, createXpcMainEmitter, xpcCenter, xpcIgnore, xpcMain };

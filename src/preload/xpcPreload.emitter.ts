@@ -29,5 +29,5 @@ export const createXpcPreloadEmitter = <T>(className: string): XpcEmitterOf<T> =
       const channel = buildXpcChannel(className, prop);
       return (params?: any) => xpcRenderer.send(channel, params);
     },
-  });
+  }) as XpcEmitterOf<T>;
 };

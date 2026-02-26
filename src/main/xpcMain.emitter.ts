@@ -29,5 +29,5 @@ export const createXpcMainEmitter = <T>(className: string): XpcEmitterOf<T> => {
       const channel = buildXpcChannel(className, prop);
       return (params?: any) => xpcMain.send(channel, params);
     },
-  });
+  }) as XpcEmitterOf<T>;
 };
