@@ -1,11 +1,11 @@
 import { Semaphore } from '@rig-lib/semaphore';
 import { XpcPayload } from '../shared/xpc.type';
 
-export class XpcTask implements XpcPayload {
+export class XpcForkTask implements XpcPayload {
   id: string;
   handleName: string;
   params?: any;
-  ret?: any;
+  ret: any;
 
   private semaphore: Semaphore;
 

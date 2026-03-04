@@ -1,7 +1,8 @@
 'use strict';
 
 var electron = require('electron');
-var rigFoundation = require('rig-foundation');
+var semaphore = require('@rig-lib/semaphore');
+var child_process = require('child_process');
 
 // src/main/xpcCenter.helper.ts
 var XpcTask = class {
@@ -10,7 +11,7 @@ var XpcTask = class {
     this.handleName = payload.handleName;
     this.params = payload.params;
     this.ret = payload.ret ?? null;
-    this.semaphore = new rigFoundation.Semaphore(1);
+    this.semaphore = new semaphore.Semaphore(1);
     this.semaphore.take(() => {
     });
   }
@@ -202,7 +203,53 @@ var createXpcMainEmitter = (className) => {
     }
   });
 };
+var FORK_FINISH = "__fork_finish__";
+var XpcForkedParent = class {
+  constructor(scriptPath) {
+    this.handlers = /* @__PURE__ */ new Map();
+    this.child = child_process.fork(scriptPath);
+    this.setupListeners();
+  }
+  /**
+   * Register a handler callable by the child process via invoke().
+   */
+  handle(handleName, handler) {
+    this.handlers.set(handleName, handler);
+  }
+  setupListeners() {
+    this.child.on("message", async (message) => {
+      if (!message) return;
+      const payload = message;
+      if (!payload.id || !payload.handleName) return;
+      const { id, handleName, params } = payload;
+      const handler = this.handlers.get(handleName);
+      let ret = null;
+      if (handler) {
+        try {
+          ret = await handler(params) ?? null;
+        } catch (err) {
+          console.error(`[XpcForkedParent] Handler "${handleName}" threw:`, err);
+          ret = null;
+        }
+      } else {
+        console.warn(`[XpcForkedParent] No handler registered for "${handleName}"`);
+      }
+      const finishMessage = {
+        __fork_event__: FORK_FINISH,
+        payload: {
+          id,
+          handleName,
+          ret
+        }
+      };
+      if (this.child.connected) {
+        this.child.send(finishMessage);
+      }
+    });
+  }
+};
 
+exports.XpcForkedParent = XpcForkedParent;
 exports.XpcMainHandler = XpcMainHandler;
 exports.XpcTask = XpcTask;
 exports.createXpcMainEmitter = createXpcMainEmitter;

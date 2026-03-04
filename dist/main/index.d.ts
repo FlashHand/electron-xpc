@@ -1,3 +1,5 @@
+import { ChildProcess } from 'child_process';
+
 /**
  * XpcCenter: runs in the main process.
  * - Listens for __xpc_register__: renderer registers a handleName, center stores {handleName → webContentsId}
@@ -156,6 +158,33 @@ type XpcEmitterOf<T> = {
  */
 declare const createXpcMainEmitter: <T>(className: string) => XpcEmitterOf<T>;
 
+type ForkHandler = (params?: any) => Promise<any>;
+/**
+ * XpcForkedParent: runs in the main (Electron main) process.
+ * - Forks a child process at initialization.
+ * - handle(): register a named handler that the child can invoke.
+ * - When the child sends __fork_exec__, the parent looks up the handler,
+ *   executes it, and sends __fork_finish__ back with the result.
+ *
+ * Usage:
+ * ```ts
+ * const parent = new XpcForkedParent('/path/to/child.js');
+ * parent.handle('myHandle', async (params) => {
+ *   return { result: 'hello' };
+ * });
+ * ```
+ */
+declare class XpcForkedParent {
+    readonly child: ChildProcess;
+    private handlers;
+    constructor(scriptPath: string);
+    /**
+     * Register a handler callable by the child process via invoke().
+     */
+    handle(handleName: string, handler: ForkHandler): void;
+    private setupListeners;
+}
+
 /**
  * Decorator to mark a method as ignored for xpc handler auto-registration.
  *
@@ -171,4 +200,4 @@ declare const createXpcMainEmitter: <T>(className: string) => XpcEmitterOf<T>;
  */
 declare const xpcIgnore: (target: any, propertyKey: string) => void;
 
-export { type XpcEmitterOf, XpcMainHandler, type XpcPayload, XpcTask, createXpcMainEmitter, xpcCenter, xpcIgnore, xpcMain };
+export { type XpcEmitterOf, XpcForkedParent, XpcMainHandler, type XpcPayload, XpcTask, createXpcMainEmitter, xpcCenter, xpcIgnore, xpcMain };

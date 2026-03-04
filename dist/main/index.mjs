@@ -1,5 +1,6 @@
 import { webContents, ipcMain } from 'electron';
-import { Semaphore } from 'rig-foundation';
+import { Semaphore } from '@rig-lib/semaphore';
+import { fork } from 'child_process';
 
 // src/main/xpcCenter.helper.ts
 var XpcTask = class {
@@ -200,7 +201,52 @@ var createXpcMainEmitter = (className) => {
     }
   });
 };
+var FORK_FINISH = "__fork_finish__";
+var XpcForkedParent = class {
+  constructor(scriptPath) {
+    this.handlers = /* @__PURE__ */ new Map();
+    this.child = fork(scriptPath);
+    this.setupListeners();
+  }
+  /**
+   * Register a handler callable by the child process via invoke().
+   */
+  handle(handleName, handler) {
+    this.handlers.set(handleName, handler);
+  }
+  setupListeners() {
+    this.child.on("message", async (message) => {
+      if (!message) return;
+      const payload = message;
+      if (!payload.id || !payload.handleName) return;
+      const { id, handleName, params } = payload;
+      const handler = this.handlers.get(handleName);
+      let ret = null;
+      if (handler) {
+        try {
+          ret = await handler(params) ?? null;
+        } catch (err) {
+          console.error(`[XpcForkedParent] Handler "${handleName}" threw:`, err);
+          ret = null;
+        }
+      } else {
+        console.warn(`[XpcForkedParent] No handler registered for "${handleName}"`);
+      }
+      const finishMessage = {
+        __fork_event__: FORK_FINISH,
+        payload: {
+          id,
+          handleName,
+          ret
+        }
+      };
+      if (this.child.connected) {
+        this.child.send(finishMessage);
+      }
+    });
+  }
+};
 
-export { XpcMainHandler, XpcTask, createXpcMainEmitter, xpcCenter, xpcIgnore, xpcMain };
+export { XpcForkedParent, XpcMainHandler, XpcTask, createXpcMainEmitter, xpcCenter, xpcIgnore, xpcMain };
 //# sourceMappingURL=index.mjs.map
 //# sourceMappingURL=index.mjs.map

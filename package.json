@@ -32,6 +32,16 @@
         "types": "./dist/renderer/index.d.mts",
         "default": "./dist/renderer/index.mjs"
       }
+    },
+    "./forked": {
+      "require": {
+        "types": "./dist/forked/index.d.ts",
+        "default": "./dist/forked/index.js"
+      },
+      "import": {
+        "types": "./dist/forked/index.d.mts",
+        "default": "./dist/forked/index.mjs"
+      }
     }
   },
   "files": [
@@ -44,13 +54,14 @@
     "publish:npm": "npm publish --registry=https://registry.npmjs.org/"
   },
   "peerDependencies": {
-    "electron": ">=20.0.0",
-    "rig-foundation": ">=1.0.0"
+    "@rig-lib/semaphore": ">=1.0.0",
+    "electron": ">=20.0.0"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
   },
   "devDependencies": {
+    "@types/node": "^25.3.1",
     "tsup": "^8.0.0",
     "typescript": "^5.3.0"
   },
@@ -64,5 +75,8 @@
     "cross-process",
     "async/await",
     "renderer to renderer"
-  ]
+  ],
+  "dependencies": {
+    "@rig-lib/semaphore": "^1.0.2"
+  }
 }

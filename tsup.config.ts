@@ -10,7 +10,7 @@ export default defineConfig([
     clean: true,
     outDir: 'dist/main',
     treeshake: true,
-    external: ['electron', 'rig-foundation'],
+    external: ['electron', '@rig-lib/semaphore'],
   },
   {
     entry: { index: 'src/preload/index.ts' },
@@ -21,7 +21,7 @@ export default defineConfig([
     clean: false,
     outDir: 'dist/preload',
     treeshake: true,
-    external: ['electron', 'rig-foundation'],
+    external: ['electron', '@rig-lib/semaphore'],
   },
   {
     entry: { index: 'src/renderer/index.ts' },
@@ -32,6 +32,17 @@ export default defineConfig([
     clean: false,
     outDir: 'dist/renderer',
     treeshake: true,
-    external: ['electron'],
+    external: ['electron', '@rig-lib/semaphore'],
+  },
+  {
+    entry: { index: 'src/forked/index.ts' },
+    format: ['cjs', 'esm'],
+    dts: true,
+    splitting: false,
+    sourcemap: true,
+    clean: false,
+    outDir: 'dist/forked',
+    treeshake: true,
+    external: ['@rig-lib/semaphore'],
   },
 ]);
