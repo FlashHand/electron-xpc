@@ -32,16 +32,6 @@
         "types": "./dist/renderer/index.d.mts",
         "default": "./dist/renderer/index.mjs"
       }
-    },
-    "./forked": {
-      "require": {
-        "types": "./dist/forked/index.d.ts",
-        "default": "./dist/forked/index.js"
-      },
-      "import": {
-        "types": "./dist/forked/index.d.mts",
-        "default": "./dist/forked/index.mjs"
-      }
     }
   },
   "files": [

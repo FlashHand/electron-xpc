@@ -34,15 +34,4 @@ export default defineConfig([
     treeshake: true,
     external: ['electron', '@rig-lib/semaphore'],
   },
-  {
-    entry: { index: 'src/forked/index.ts' },
-    format: ['cjs', 'esm'],
-    dts: true,
-    splitting: false,
-    sourcemap: true,
-    clean: false,
-    outDir: 'dist/forked',
-    treeshake: true,
-    external: ['@rig-lib/semaphore'],
-  },
 ]);
