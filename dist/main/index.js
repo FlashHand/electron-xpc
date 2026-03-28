@@ -2,7 +2,7 @@
 
 var electron = require('electron');
 var semaphore = require('@rig-lib/semaphore');
-var child_process = require('child_process');
+var crypto = require('crypto');
 
 // src/main/xpcCenter.helper.ts
 var XpcTask = class {
@@ -40,8 +40,8 @@ var counter = 0;
 var generateXpcId = () => {
   return `${prefix}-${(++counter).toString(36)}`;
 };
-
-// src/main/xpcMain.helper.ts
+var XPC_REGISTER = "__xpc_register__";
+var XPC_FINISH = "__xpc_finish__";
 var XpcMain = class {
   constructor() {
     this.handlers = /* @__PURE__ */ new Map();
@@ -70,15 +70,53 @@ var XpcMain = class {
   }
 };
 var xpcMain = new XpcMain();
-
-// src/main/xpcCenter.helper.ts
-var XPC_REGISTER = "__xpc_register__";
+function createUtilityProcess(options) {
+  const { modulePath, args, env, execArgv, serviceName } = options;
+  const { port1, port2 } = new electron.MessageChannelMain();
+  const forkOptions = {
+    stdio: "pipe"
+  };
+  if (env !== void 0) {
+    forkOptions.env = env;
+  }
+  if (execArgv !== void 0) {
+    forkOptions.execArgv = execArgv;
+  }
+  if (serviceName !== void 0) {
+    forkOptions.serviceName = serviceName;
+  }
+  const child = electron.utilityProcess.fork(modulePath, args, forkOptions);
+  child.postMessage({ type: "xpc:init" }, [port1]);
+  port2.on("message", async (event) => {
+    const message = event.data;
+    const { type, payload, handleName } = message;
+    if (type === XPC_REGISTER) {
+      console.log(`[xpcMain] Utility process registered handler: ${handleName}`);
+      xpcCenter.registerPortHandler(handleName, port2);
+    }
+    if (type === XPC_FINISH && payload) {
+      xpcCenter.handleUtilityFinish(payload);
+    }
+  });
+  port2.start();
+  const kill = () => {
+    port2.close();
+    return child.kill();
+  };
+  return {
+    child,
+    kill
+  };
+}
+var XPC_REGISTER2 = "__xpc_register__";
 var XPC_EXEC = "__xpc_exec__";
-var XPC_FINISH = "__xpc_finish__";
+var XPC_FINISH2 = "__xpc_finish__";
 var XpcCenter = class {
   constructor() {
-    /** handleName → webContentsId */
+    /** handleName → RegistryEntry */
     this.registry = /* @__PURE__ */ new Map();
+    /** port_id → MessagePortMain */
+    this.port2Map = /* @__PURE__ */ new Map();
     /** task.id → XpcTask (with semaphore block/unblock) */
     this.pendingTasks = /* @__PURE__ */ new Map();
   }
@@ -89,16 +127,39 @@ var XpcCenter = class {
    * Register a main-process handleName in the registry with webContentsId = 0.
    */
   registerMainHandler(handleName) {
-    this.registry.set(handleName, 0);
+    this.registry.set(handleName, { type: "renderer", id: 0 });
+  }
+  /**
+   * Register a utility process port handler.
+   * @param handleName - The handler name
+   * @param port2 - The MessagePort for communication
+   * @returns The generated port_id
+   */
+  registerPortHandler(handleName, port2) {
+    const portId = crypto.randomUUID();
+    this.registry.set(handleName, { type: "port", id: portId });
+    this.port2Map.set(portId, port2);
+    return portId;
+  }
+  /**
+   * Handle finish message from utility process.
+   * Called by xpcMain when utility process sends XPC_FINISH.
+   */
+  handleUtilityFinish(payload) {
+    const task = this.pendingTasks.get(payload.id);
+    if (task) {
+      task.ret = payload.ret ?? null;
+      task.unblock();
+    }
   }
   /**
    * Execute a handleName: if main-process handler, call directly;
-   * otherwise forward to target renderer, block until __xpc_finish__.
+   * otherwise forward to target renderer or utility process, block until __xpc_finish__.
    * Used by both ipcMain.handle(XPC_EXEC) and xpcMain.send().
    */
   async exec(handleName, params) {
-    const targetId = this.registry.get(handleName);
-    if (targetId == null) {
+    const entry = this.registry.get(handleName);
+    if (entry == null) {
       return null;
     }
     const payload = {
@@ -106,7 +167,7 @@ var XpcCenter = class {
       handleName,
       params
     };
-    if (targetId === 0) {
+    if (entry.type === "renderer" && entry.id === 0) {
       const handler = xpcMain.getHandler(handleName);
       if (!handler) {
         return null;
@@ -117,7 +178,23 @@ var XpcCenter = class {
         return null;
       }
     }
-    const target = electron.webContents.fromId(targetId);
+    if (entry.type === "port") {
+      const port2 = this.port2Map.get(entry.id);
+      if (!port2) {
+        return null;
+      }
+      const task2 = new XpcTask(payload);
+      this.pendingTasks.set(task2.id, task2);
+      port2.postMessage({
+        type: "exec",
+        handleName,
+        payload
+      });
+      await task2.block();
+      this.pendingTasks.delete(task2.id);
+      return task2.toPayload().ret ?? null;
+    }
+    const target = electron.webContents.fromId(entry.id);
     if (!target || target.isDestroyed() || target.isCrashed()) {
       return null;
     }
@@ -129,17 +206,17 @@ var XpcCenter = class {
     return task.toPayload().ret ?? null;
   }
   setupListeners() {
-    electron.ipcMain.on(XPC_REGISTER, (event, payload) => {
-      const existingId = this.registry.get(payload.handleName);
-      if (existingId != null && existingId !== event.sender.id) {
-        console.log(`[xpcCenter] handler "${payload.handleName}" overwritten: webContentsId ${existingId} \u2192 ${event.sender.id}`);
+    electron.ipcMain.on(XPC_REGISTER2, (event, payload) => {
+      const existing = this.registry.get(payload.handleName);
+      if (existing != null && !(existing.type === "renderer" && existing.id === event.sender.id)) {
+        console.log(`[xpcCenter] handler "${payload.handleName}" overwritten: ${existing.type}:${existing.id} \u2192 renderer:${event.sender.id}`);
       }
-      this.registry.set(payload.handleName, event.sender.id);
+      this.registry.set(payload.handleName, { type: "renderer", id: event.sender.id });
     });
     electron.ipcMain.handle(XPC_EXEC, async (_event, payload) => {
       return this.exec(payload.handleName, payload.params);
     });
-    electron.ipcMain.on(XPC_FINISH, (_event, payload) => {
+    electron.ipcMain.on(XPC_FINISH2, (_event, payload) => {
       const task = this.pendingTasks.get(payload.id);
       if (task) {
         task.ret = payload.ret ?? null;
@@ -203,55 +280,10 @@ var createXpcMainEmitter = (className) => {
     }
   });
 };
-var FORK_FINISH = "__fork_finish__";
-var XpcForkedParent = class {
-  constructor(scriptPath) {
-    this.handlers = /* @__PURE__ */ new Map();
-    this.child = child_process.fork(scriptPath);
-    this.setupListeners();
-  }
-  /**
-   * Register a handler callable by the child process via invoke().
-   */
-  handle(handleName, handler) {
-    this.handlers.set(handleName, handler);
-  }
-  setupListeners() {
-    this.child.on("message", async (message) => {
-      if (!message) return;
-      const payload = message;
-      if (!payload.id || !payload.handleName) return;
-      const { id, handleName, params } = payload;
-      const handler = this.handlers.get(handleName);
-      let ret = null;
-      if (handler) {
-        try {
-          ret = await handler(params) ?? null;
-        } catch (err) {
-          console.error(`[XpcForkedParent] Handler "${handleName}" threw:`, err);
-          ret = null;
-        }
-      } else {
-        console.warn(`[XpcForkedParent] No handler registered for "${handleName}"`);
-      }
-      const finishMessage = {
-        __fork_event__: FORK_FINISH,
-        payload: {
-          id,
-          handleName,
-          ret
-        }
-      };
-      if (this.child.connected) {
-        this.child.send(finishMessage);
-      }
-    });
-  }
-};
 
-exports.XpcForkedParent = XpcForkedParent;
 exports.XpcMainHandler = XpcMainHandler;
 exports.XpcTask = XpcTask;
+exports.createUtilityProcess = createUtilityProcess;
 exports.createXpcMainEmitter = createXpcMainEmitter;
 exports.xpcCenter = xpcCenter;
 exports.xpcIgnore = xpcIgnore;

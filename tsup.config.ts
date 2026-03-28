@@ -34,4 +34,15 @@ export default defineConfig([
     treeshake: true,
     external: ['electron', '@rig-lib/semaphore'],
   },
+  {
+    entry: { index: 'src/utilityProcess/index.ts' },
+    format: ['cjs', 'esm'],
+    dts: true,
+    splitting: false,
+    sourcemap: true,
+    clean: false,
+    outDir: 'dist/utilityProcess',
+    treeshake: true,
+    external: ['@rig-lib/semaphore', 'worker_threads'],
+  },
 ]);

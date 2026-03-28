@@ -1,31 +1,4 @@
-import { ChildProcess } from 'child_process';
-
-/**
- * XpcCenter: runs in the main process.
- * - Listens for __xpc_register__: renderer registers a handleName, center stores {handleName → webContentsId}
- * - Listens for __xpc_exec__ (ipcMain.handle): renderer invokes exec, center forwards to target renderer,
- *   blocks via semaphore until __xpc_finish__ is received, then returns result.
- * - Listens for __xpc_finish__: target renderer finished execution, unblocks the pending task.
- */
-declare class XpcCenter {
-    /** handleName → webContentsId */
-    private registry;
-    /** task.id → XpcTask (with semaphore block/unblock) */
-    private pendingTasks;
-    init(): void;
-    /**
-     * Register a main-process handleName in the registry with webContentsId = 0.
-     */
-    registerMainHandler(handleName: string): void;
-    /**
-     * Execute a handleName: if main-process handler, call directly;
-     * otherwise forward to target renderer, block until __xpc_finish__.
-     * Used by both ipcMain.handle(XPC_EXEC) and xpcMain.send().
-     */
-    exec(handleName: string, params?: any): Promise<any>;
-    private setupListeners;
-}
-declare const xpcCenter: XpcCenter;
+import { MessagePortMain } from 'electron';
 
 type XpcPayload = {
     /** Unique task ID, guaranteed unique within process lifetime */
@@ -37,6 +10,47 @@ type XpcPayload = {
     /** Return data from target process, nullable, defaults to null */
     ret?: any;
 };
+
+/**
+ * XpcCenter: runs in the main process.
+ * - Listens for __xpc_register__: renderer registers a handleName, center stores {handleName → webContentsId}
+ * - Listens for __xpc_exec__ (ipcMain.handle): renderer invokes exec, center forwards to target renderer or utility process,
+ *   blocks via semaphore until __xpc_finish__ is received, then returns result.
+ * - Listens for __xpc_finish__: target renderer/utility finished execution, unblocks the pending task.
+ */
+declare class XpcCenter {
+    /** handleName → RegistryEntry */
+    private registry;
+    /** port_id → MessagePortMain */
+    private port2Map;
+    /** task.id → XpcTask (with semaphore block/unblock) */
+    private pendingTasks;
+    init(): void;
+    /**
+     * Register a main-process handleName in the registry with webContentsId = 0.
+     */
+    registerMainHandler(handleName: string): void;
+    /**
+     * Register a utility process port handler.
+     * @param handleName - The handler name
+     * @param port2 - The MessagePort for communication
+     * @returns The generated port_id
+     */
+    registerPortHandler(handleName: string, port2: MessagePortMain): string;
+    /**
+     * Handle finish message from utility process.
+     * Called by xpcMain when utility process sends XPC_FINISH.
+     */
+    handleUtilityFinish(payload: XpcPayload): void;
+    /**
+     * Execute a handleName: if main-process handler, call directly;
+     * otherwise forward to target renderer or utility process, block until __xpc_finish__.
+     * Used by both ipcMain.handle(XPC_EXEC) and xpcMain.send().
+     */
+    exec(handleName: string, params?: any): Promise<any>;
+    private setupListeners;
+}
+declare const xpcCenter: XpcCenter;
 
 type XpcHandler = (payload: XpcPayload) => Promise<any>;
 /**
@@ -63,6 +77,47 @@ declare class XpcMain {
     send(handleName: string, params?: any): Promise<any>;
 }
 declare const xpcMain: XpcMain;
+interface UtilityProcessOptions {
+    modulePath: string;
+    args?: string[];
+    env?: Record<string, string>;
+    execArgv?: string[];
+    serviceName?: string;
+}
+interface XpcUtilityProcess {
+    child: Electron.UtilityProcess;
+    kill: () => boolean;
+}
+/**
+ * Create a utility process with XPC communication support.
+ * Sets up MessagePort for bidirectional communication between main and utility process.
+ * The utility process uses xpcUtilityProcess.handle() to register handlers.
+ * Other processes (renderer/main) can call these handlers via xpcRenderer.send() or xpcMain.send().
+ *
+ * @param options - Configuration for the utility process
+ * @returns XpcUtilityProcess object with child process and kill method
+ *
+ * @example
+ * ```ts
+ * // In main process
+ * const worker = createUtilityProcess({
+ *   modulePath: path.join(__dirname, 'worker.js')
+ * });
+ *
+ * // Listen to stdout/stderr
+ * worker.child.stdout?.on('data', (data) => console.log(data.toString()));
+ *
+ * // In utility process (worker.js)
+ * import { xpcUtilityProcess } from 'electron-xpc/utilityProcess';
+ * xpcUtilityProcess.handle('processData', async (payload) => {
+ *   return { result: 'processed' };
+ * });
+ *
+ * // In renderer process
+ * const result = await xpcRenderer.send('processData', { input: 'test' });
+ * ```
+ */
+declare function createUtilityProcess(options: UtilityProcessOptions): XpcUtilityProcess;
 
 declare class XpcTask implements XpcPayload {
     id: string;
@@ -158,33 +213,6 @@ type XpcEmitterOf<T> = {
  */
 declare const createXpcMainEmitter: <T>(className: string) => XpcEmitterOf<T>;
 
-type ForkHandler = (params?: any) => Promise<any>;
-/**
- * XpcForkedParent: runs in the main (Electron main) process.
- * - Forks a child process at initialization.
- * - handle(): register a named handler that the child can invoke.
- * - When the child sends __fork_exec__, the parent looks up the handler,
- *   executes it, and sends __fork_finish__ back with the result.
- *
- * Usage:
- * ```ts
- * const parent = new XpcForkedParent('/path/to/child.js');
- * parent.handle('myHandle', async (params) => {
- *   return { result: 'hello' };
- * });
- * ```
- */
-declare class XpcForkedParent {
-    readonly child: ChildProcess;
-    private handlers;
-    constructor(scriptPath: string);
-    /**
-     * Register a handler callable by the child process via invoke().
-     */
-    handle(handleName: string, handler: ForkHandler): void;
-    private setupListeners;
-}
-
 /**
  * Decorator to mark a method as ignored for xpc handler auto-registration.
  *
@@ -200,4 +228,4 @@ declare class XpcForkedParent {
  */
 declare const xpcIgnore: (target: any, propertyKey: string) => void;
 
-export { type XpcEmitterOf, XpcForkedParent, XpcMainHandler, type XpcPayload, XpcTask, createXpcMainEmitter, xpcCenter, xpcIgnore, xpcMain };
+export { type UtilityProcessOptions, type XpcEmitterOf, XpcMainHandler, type XpcPayload, XpcTask, type XpcUtilityProcess, createUtilityProcess, createXpcMainEmitter, xpcCenter, xpcIgnore, xpcMain };

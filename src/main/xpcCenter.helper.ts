@@ -1,23 +1,31 @@
-import { ipcMain, webContents } from 'electron';
+import { ipcMain, webContents, MessagePortMain } from 'electron';
 import { XpcPayload } from '../shared/xpc.type';
 import { XpcTask } from './xpcTask.helper';
 import { generateXpcId } from './xpcId.helper';
 import { xpcMain } from './xpcMain.helper';
+import { randomUUID } from 'crypto';
 
 const XPC_REGISTER = '__xpc_register__';
 const XPC_EXEC = '__xpc_exec__';
 const XPC_FINISH = '__xpc_finish__';
 
+interface RegistryEntry {
+  type: 'renderer' | 'port';
+  id: number | string; // webContentsId for renderer, port_id (uuid) for port
+}
+
 /**
  * XpcCenter: runs in the main process.
  * - Listens for __xpc_register__: renderer registers a handleName, center stores {handleName → webContentsId}
- * - Listens for __xpc_exec__ (ipcMain.handle): renderer invokes exec, center forwards to target renderer,
+ * - Listens for __xpc_exec__ (ipcMain.handle): renderer invokes exec, center forwards to target renderer or utility process,
  *   blocks via semaphore until __xpc_finish__ is received, then returns result.
- * - Listens for __xpc_finish__: target renderer finished execution, unblocks the pending task.
+ * - Listens for __xpc_finish__: target renderer/utility finished execution, unblocks the pending task.
  */
 class XpcCenter {
-  /** handleName → webContentsId */
-  private registry = new Map<string, number>();
+  /** handleName → RegistryEntry */
+  private registry = new Map<string, RegistryEntry>();
+  /** port_id → MessagePortMain */
+  private port2Map = new Map<string, MessagePortMain>();
   /** task.id → XpcTask (with semaphore block/unblock) */
   private pendingTasks = new Map<string, XpcTask>();
 
@@ -29,17 +37,42 @@ class XpcCenter {
    * Register a main-process handleName in the registry with webContentsId = 0.
    */
   registerMainHandler(handleName: string): void {
-    this.registry.set(handleName, 0);
+    this.registry.set(handleName, { type: 'renderer', id: 0 });
+  }
+
+  /**
+   * Register a utility process port handler.
+   * @param handleName - The handler name
+   * @param port2 - The MessagePort for communication
+   * @returns The generated port_id
+   */
+  registerPortHandler(handleName: string, port2: MessagePortMain): string {
+    const portId = randomUUID();
+    this.registry.set(handleName, { type: 'port', id: portId });
+    this.port2Map.set(portId, port2);
+    return portId;
+  }
+
+  /**
+   * Handle finish message from utility process.
+   * Called by xpcMain when utility process sends XPC_FINISH.
+   */
+  handleUtilityFinish(payload: XpcPayload): void {
+    const task = this.pendingTasks.get(payload.id);
+    if (task) {
+      task.ret = payload.ret ?? null;
+      task.unblock();
+    }
   }
 
   /**
    * Execute a handleName: if main-process handler, call directly;
-   * otherwise forward to target renderer, block until __xpc_finish__.
+   * otherwise forward to target renderer or utility process, block until __xpc_finish__.
    * Used by both ipcMain.handle(XPC_EXEC) and xpcMain.send().
    */
   async exec(handleName: string, params?: any): Promise<any> {
-    const targetId = this.registry.get(handleName);
-    if (targetId == null) {
+    const entry = this.registry.get(handleName);
+    if (entry == null) {
       return null;
     }
 
@@ -49,8 +82,8 @@ class XpcCenter {
       params,
     };
 
-    // targetId === 0 means the handler is registered in the main process
-    if (targetId === 0) {
+    // Main process handler (type: renderer, id: 0)
+    if (entry.type === 'renderer' && entry.id === 0) {
       const handler = xpcMain.getHandler(handleName);
       if (!handler) {
         return null;
@@ -62,7 +95,33 @@ class XpcCenter {
       }
     }
 
-    const target = webContents.fromId(targetId);
+    // Utility process handler (type: port)
+    if (entry.type === 'port') {
+      const port2 = this.port2Map.get(entry.id as string);
+      if (!port2) {
+        return null;
+      }
+
+      // Create semaphore-blocked task
+      const task = new XpcTask(payload);
+      this.pendingTasks.set(task.id, task);
+
+      // Forward to utility process via MessagePort
+      port2.postMessage({
+        type: 'exec',
+        handleName,
+        payload,
+      });
+
+      // Block until __xpc_finish__ unblocks
+      await task.block();
+      this.pendingTasks.delete(task.id);
+
+      return task.toPayload().ret ?? null;
+    }
+
+    // Renderer process handler
+    const target = webContents.fromId(entry.id as number);
     if (!target || target.isDestroyed() || target.isCrashed()) {
       return null;
     }
@@ -85,11 +144,11 @@ class XpcCenter {
   private setupListeners(): void {
     // Renderer registers a handleName (overwrites previous registration for the same handleName)
     ipcMain.on(XPC_REGISTER, (event, payload: { handleName: string }) => {
-      const existingId = this.registry.get(payload.handleName);
-      if (existingId != null && existingId !== event.sender.id) {
-        console.log(`[xpcCenter] handler "${payload.handleName}" overwritten: webContentsId ${existingId} → ${event.sender.id}`);
+      const existing = this.registry.get(payload.handleName);
+      if (existing != null && !(existing.type === 'renderer' && existing.id === event.sender.id)) {
+        console.log(`[xpcCenter] handler "${payload.handleName}" overwritten: ${existing.type}:${existing.id} → renderer:${event.sender.id}`);
       }
-      this.registry.set(payload.handleName, event.sender.id);
+      this.registry.set(payload.handleName, { type: 'renderer', id: event.sender.id });
     });
 
     // Renderer invokes exec via IPC

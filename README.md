@@ -208,6 +208,145 @@ await notifyEmitter.showToast({ text: 'Hello!' });
 
 ---
 
+## Utility Process
+
+Electron's [Utility Process](https://www.electronjs.org/docs/latest/api/utility-process) runs in a sandboxed Node.js environment, ideal for CPU-intensive or I/O-heavy work. `electron-xpc` integrates utility processes into the same XPC communication fabric — any renderer or main process can call a utility process handler using the same `send()` API.
+
+### Process Layers for Utility Process
+
+| Layer | Import Path |
+|-------|-------------|
+| **Main** (create & manage) | `electron-xpc/main` |
+| **Utility Process** (handle & send) | `electron-xpc/utilityProcess` |
+
+---
+
+### Step 1: Create the Utility Process in Main
+
+```ts
+// src/main/index.ts
+import { createUtilityProcess } from 'electron-xpc/main';
+import * as path from 'path';
+
+app.whenReady().then(() => {
+  xpcCenter.init();
+
+  const worker = createUtilityProcess({
+    modulePath: path.join(__dirname, 'worker.js'),
+    serviceName: 'my-worker',
+  });
+
+  // Optional: pipe stdout/stderr to see console.log from utility process
+  worker.child.stdout?.on('data', (data) => console.log('[worker]', data.toString()));
+  worker.child.stderr?.on('data', (data) => console.error('[worker]', data.toString()));
+});
+```
+
+---
+
+### Step 2: Register Handlers in the Utility Process
+
+Handlers registered via `xpcUtilityProcess.handle()` are automatically forwarded to `xpcCenter` in the main process and become callable from any layer (renderer, preload, main).
+
+```ts
+// src/utility/worker.ts
+import { xpcUtilityProcess } from 'electron-xpc/utilityProcess';
+
+// Handlers can be registered at top-level before the MessagePort is initialized.
+// They are queued and replayed automatically once the port is ready.
+xpcUtilityProcess.handle('worker/processData', async (payload) => {
+  console.log('[worker] received:', payload.params);
+  const result = heavyComputation(payload.params.input);
+  return { result };
+});
+
+xpcUtilityProcess.handle('worker/getStatus', async () => {
+  return { status: 'idle', uptime: process.uptime() };
+});
+```
+
+---
+
+### Step 3: Call Utility Process Handlers from Any Layer
+
+Once registered, any process can call the handler with the same `send()` API:
+
+**From Renderer / Preload:**
+```ts
+import { xpcRenderer } from 'electron-xpc/preload'; // or 'electron-xpc/renderer'
+
+const result = await xpcRenderer.send('worker/processData', { input: 'hello' });
+console.log(result); // { result: '...' }
+```
+
+**From Main Process:**
+```ts
+import { xpcMain } from 'electron-xpc/main';
+
+const status = await xpcMain.send('worker/getStatus');
+console.log(status); // { status: 'idle', uptime: 42 }
+```
+
+---
+
+### Step 4: Send from Utility Process to Other Handlers
+
+The utility process can also call handlers registered in the main or renderer processes:
+
+```ts
+// src/utility/worker.ts
+import { xpcUtilityProcess } from 'electron-xpc/utilityProcess';
+
+xpcUtilityProcess.handle('worker/doSomething', async (payload) => {
+  // Call a handler registered in renderer or main
+  const rendererResult = await xpcUtilityProcess.send('renderer/hello', { from: 'worker' });
+  console.log('[worker] renderer replied:', rendererResult);
+  return { done: true };
+});
+```
+
+**Renderer side:**
+```ts
+import { xpcRenderer } from 'electron-xpc/preload';
+
+xpcRenderer.handle('renderer/hello', async (payload) => {
+  console.log('[renderer] called by worker with:', payload.params);
+  return 'hello from renderer';
+});
+```
+
+---
+
+### Communication Flow (with Utility Process)
+
+```
+Renderer / Main                Main Process (xpcCenter)         Utility Process
+      |                                |                               |
+      |  xpcRenderer.handle(...)       |                               |
+      |  __xpc_register__ -----------> |                               |
+      |                                |                               |
+      |                                |   xpcUtilityProcess.handle()  |
+      |                                | <-- __xpc_register__ (port2) -|
+      |                                |   registerPortHandler(name)   |
+      |                                |                               |
+      |  xpcRenderer.send('worker/x') |                               |
+      |  __xpc_exec__ ---------------> |                               |
+      |                                |  port2.postMessage(exec) ---> |
+      |                                |  [semaphore blocks]           |  execute handler
+      |                                | <-- port1.postMessage(finish)-|
+      |                                |  [semaphore unblocks]         |
+      |  <---- return result --------- |                               |
+      |                                |                               |
+      |                                |  xpcUtilityProcess.send(...)  |
+      |                                | <-- __xpc_exec__ (port1) ---- |
+      |  <---- forward(name) --------- |                               |
+      |  execute handler               |                               |
+      |  __xpc_finish__ ------------>  |                               |
+      |                                |  ----> return result (port2) -|
+```
+
+---
+
 ## Architecture
 
 ### Communication Flow
