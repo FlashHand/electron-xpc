@@ -5,6 +5,9 @@ import { generateXpcId } from './xpcId.helper';
 const XPC_REGISTER = '__xpc_register__';
 const XPC_EXEC = '__xpc_exec__';
 const XPC_FINISH = '__xpc_finish__';
+const XPC_SUBSCRIBE = '__xpc_subscribe__';
+const XPC_BROADCAST = '__xpc_broadcast__';
+const XPC_BROADCAST_DISPATCH = '__xpc_broadcast_dispatch__';
 
 type XpcHandler = (payload: XpcPayload) => Promise<any>;
 
@@ -12,6 +15,8 @@ export interface XpcUtilityProcessApi {
   handle: (handleName: string, handler: (payload: XpcPayload) => Promise<any>) => void;
   removeHandle: (handleName: string) => void;
   send: (handleName: string, params?: any) => Promise<any>;
+  subscribe: (handleName: string, callback: (payload: XpcPayload) => void) => void;
+  broadcast: (handleName: string, params?: any) => void;
 }
 
 /**
@@ -24,6 +29,8 @@ class XpcUtilityProcess implements XpcUtilityProcessApi {
   private handlers = new Map<string, XpcHandler>();
   private pendingTasks = new Map<string, { semaphore: Semaphore; ret: any }>();
   private pendingHandlers: Array<{ handleName: string; handler: XpcHandler }> = [];
+  private subscriberCallbacks = new Map<string, (payload: XpcPayload) => void>();
+  private pendingSubscribers: Array<{ handleName: string; callback: (payload: XpcPayload) => void }> = [];
 
   /**
    * Initialize with a MessagePort from the main process.
@@ -40,6 +47,12 @@ class XpcUtilityProcess implements XpcUtilityProcessApi {
       this.registerHandler(handleName, handler);
     }
     this.pendingHandlers = [];
+
+    // Register any pending subscribers that were called before init
+    for (const { handleName, callback } of this.pendingSubscribers) {
+      this.registerSubscriber(handleName, callback);
+    }
+    this.pendingSubscribers = [];
   }
 
   /**
@@ -77,6 +90,47 @@ class XpcUtilityProcess implements XpcUtilityProcessApi {
    */
   removeHandle(handleName: string): void {
     this.handlers.delete(handleName);
+  }
+
+  /**
+   * Subscribe to a handleName. When another process broadcasts to this handleName,
+   * the callback will be invoked with the full XpcPayload.
+   */
+  subscribe(handleName: string, callback: (payload: XpcPayload) => void): void {
+    if (!this.port) {
+      this.pendingSubscribers.push({ handleName, callback });
+      return;
+    }
+    this.registerSubscriber(handleName, callback);
+  }
+
+  private registerSubscriber(handleName: string, callback: (payload: XpcPayload) => void): void {
+    this.subscriberCallbacks.set(handleName, callback);
+    this.port?.postMessage({
+      type: XPC_SUBSCRIBE,
+      handleName,
+    });
+  }
+
+  /**
+   * Broadcast to all subscribers of a handleName, excluding this utility process (self).
+   * Fire-and-forget: does not wait for subscriber responses.
+   */
+  broadcast(handleName: string, params?: any): void {
+    if (!this.port) {
+      throw new Error('[xpcUtilityProcess] MessagePort not initialized. Call init() first.');
+    }
+
+    const payload: XpcPayload = {
+      id: generateXpcId(),
+      handleName,
+      params,
+    };
+
+    this.port.postMessage({
+      type: XPC_BROADCAST,
+      payload,
+    });
   }
 
   /**
@@ -156,6 +210,14 @@ class XpcUtilityProcess implements XpcUtilityProcessApi {
         if (taskInfo) {
           taskInfo.ret = payload.ret ?? null;
           taskInfo.semaphore.leave(); // Unblock the waiting send()
+        }
+      }
+
+      // Handle broadcast dispatch from main process
+      if (type === XPC_BROADCAST_DISPATCH && payload) {
+        const cb = this.subscriberCallbacks.get(payload.handleName);
+        if (cb) {
+          try { cb(payload); } catch (_e) { /* ignore */ }
         }
       }
     });

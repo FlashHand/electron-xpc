@@ -42,6 +42,8 @@ var generateXpcId = () => {
 };
 var XPC_REGISTER = "__xpc_register__";
 var XPC_FINISH = "__xpc_finish__";
+var XPC_SUBSCRIBE = "__xpc_subscribe__";
+var XPC_BROADCAST = "__xpc_broadcast__";
 var XpcMain = class {
   constructor() {
     this.handlers = /* @__PURE__ */ new Map();
@@ -67,6 +69,20 @@ var XpcMain = class {
    */
   async send(handleName, params) {
     return xpcCenter.exec(handleName, params);
+  }
+  /**
+   * Subscribe to a handleName in the main process.
+   * The callback will be invoked when another process broadcasts to this handleName.
+   */
+  subscribe(handleName, callback) {
+    xpcCenter.registerMainSubscriber(handleName, callback);
+  }
+  /**
+   * Broadcast to all subscribers of a handleName, excluding the main process (self).
+   * Fire-and-forget: does not wait for subscriber responses.
+   */
+  broadcast(handleName, params) {
+    xpcCenter.broadcast(handleName, params, { type: "main", id: 0 });
   }
 };
 var xpcMain = new XpcMain();
@@ -97,6 +113,19 @@ function createUtilityProcess(options) {
     if (type === XPC_FINISH && payload) {
       xpcCenter.handleUtilityFinish(payload);
     }
+    if (type === XPC_SUBSCRIBE && handleName) {
+      let portId = xpcCenter.findPortId(port2);
+      if (!portId) {
+        portId = xpcCenter.registerPortHandler(handleName, port2);
+      }
+      xpcCenter.addSubscriber(handleName, { type: "port", id: portId });
+    }
+    if (type === XPC_BROADCAST && payload) {
+      const senderPortId = xpcCenter.findPortId(port2);
+      if (senderPortId) {
+        xpcCenter.broadcast(payload.handleName, payload.params, { type: "port", id: senderPortId });
+      }
+    }
   });
   port2.start();
   const kill = () => {
@@ -111,6 +140,9 @@ function createUtilityProcess(options) {
 var XPC_REGISTER2 = "__xpc_register__";
 var XPC_EXEC = "__xpc_exec__";
 var XPC_FINISH2 = "__xpc_finish__";
+var XPC_SUBSCRIBE2 = "__xpc_subscribe__";
+var XPC_BROADCAST2 = "__xpc_broadcast__";
+var XPC_BROADCAST_DISPATCH = "__xpc_broadcast_dispatch__";
 var XpcCenter = class {
   constructor() {
     /** handleName → RegistryEntry */
@@ -119,6 +151,10 @@ var XpcCenter = class {
     this.port2Map = /* @__PURE__ */ new Map();
     /** task.id → XpcTask (with semaphore block/unblock) */
     this.pendingTasks = /* @__PURE__ */ new Map();
+    /** handleName → SubscriberEntry[] */
+    this.subscribers = /* @__PURE__ */ new Map();
+    /** main-process subscriber callbacks: handleName → callback */
+    this.mainSubscriberCallbacks = /* @__PURE__ */ new Map();
   }
   init() {
     this.setupListeners();
@@ -127,7 +163,7 @@ var XpcCenter = class {
    * Register a main-process handleName in the registry with webContentsId = 0.
    */
   registerMainHandler(handleName) {
-    this.registry.set(handleName, { type: "renderer", id: 0 });
+    this.registry.set(handleName, { type: "main", id: 0 });
   }
   /**
    * Register a utility process port handler.
@@ -167,7 +203,7 @@ var XpcCenter = class {
       handleName,
       params
     };
-    if (entry.type === "renderer" && entry.id === 0) {
+    if (entry.type === "main") {
       const handler = xpcMain.getHandler(handleName);
       if (!handler) {
         return null;
@@ -205,6 +241,75 @@ var XpcCenter = class {
     this.pendingTasks.delete(task.id);
     return task.toPayload().ret ?? null;
   }
+  /**
+   * Find the portId for a given MessagePortMain instance.
+   * Returns undefined if not found.
+   */
+  findPortId(port) {
+    for (const [portId, p] of this.port2Map.entries()) {
+      if (p === port) return portId;
+    }
+    return void 0;
+  }
+  /**
+   * Add a subscriber for a handleName. Prevents duplicate entries.
+   */
+  addSubscriber(handleName, entry) {
+    let list = this.subscribers.get(handleName);
+    if (!list) {
+      list = [];
+      this.subscribers.set(handleName, list);
+    }
+    const exists = list.some((s) => s.type === entry.type && s.id === entry.id);
+    if (!exists) {
+      list.push(entry);
+    }
+  }
+  /**
+   * Register a main-process subscriber callback.
+   */
+  registerMainSubscriber(handleName, callback) {
+    this.addSubscriber(handleName, { type: "main", id: 0 });
+    this.mainSubscriberCallbacks.set(handleName, callback);
+  }
+  /**
+   * Broadcast to all subscribers of a handleName, excluding the sender.
+   * Fire-and-forget: does not wait for subscriber responses.
+   */
+  broadcast(handleName, params, sender) {
+    const list = this.subscribers.get(handleName);
+    if (!list || list.length === 0) return;
+    const payload = {
+      id: generateXpcId(),
+      handleName,
+      params
+    };
+    for (const sub of list) {
+      if (sub.type === sender.type && sub.id === sender.id) continue;
+      if (sub.type === "main") {
+        const callback = this.mainSubscriberCallbacks.get(handleName);
+        if (callback) {
+          try {
+            callback(payload);
+          } catch (_e) {
+          }
+        }
+      } else if (sub.type === "renderer") {
+        const target = electron.webContents.fromId(sub.id);
+        if (target && !target.isDestroyed() && !target.isCrashed()) {
+          target.send(XPC_BROADCAST_DISPATCH, payload);
+        }
+      } else if (sub.type === "port") {
+        const port2 = this.port2Map.get(sub.id);
+        if (port2) {
+          port2.postMessage({
+            type: XPC_BROADCAST_DISPATCH,
+            payload
+          });
+        }
+      }
+    }
+  }
   setupListeners() {
     electron.ipcMain.on(XPC_REGISTER2, (event, payload) => {
       const existing = this.registry.get(payload.handleName);
@@ -222,6 +327,12 @@ var XpcCenter = class {
         task.ret = payload.ret ?? null;
         task.unblock();
       }
+    });
+    electron.ipcMain.on(XPC_SUBSCRIBE2, (event, payload) => {
+      this.addSubscriber(payload.handleName, { type: "renderer", id: event.sender.id });
+    });
+    electron.ipcMain.on(XPC_BROADCAST2, (event, payload) => {
+      this.broadcast(payload.handleName, payload.params, { type: "renderer", id: event.sender.id });
     });
   }
 };

@@ -8,10 +8,18 @@ import { randomUUID } from 'crypto';
 const XPC_REGISTER = '__xpc_register__';
 const XPC_EXEC = '__xpc_exec__';
 const XPC_FINISH = '__xpc_finish__';
+const XPC_SUBSCRIBE = '__xpc_subscribe__';
+const XPC_BROADCAST = '__xpc_broadcast__';
+const XPC_BROADCAST_DISPATCH = '__xpc_broadcast_dispatch__';
 
 interface RegistryEntry {
-  type: 'renderer' | 'port';
-  id: number | string; // webContentsId for renderer, port_id (uuid) for port
+  type: 'main' | 'renderer' | 'port';
+  id: number | string; // 0 for main, webContentsId for renderer, port_id (uuid) for port
+}
+
+export interface SubscriberEntry {
+  type: 'main' | 'renderer' | 'port';
+  id: number | string; // 0 for main, webContentsId for renderer, port_id (uuid) for port
 }
 
 /**
@@ -28,6 +36,10 @@ class XpcCenter {
   private port2Map = new Map<string, MessagePortMain>();
   /** task.id → XpcTask (with semaphore block/unblock) */
   private pendingTasks = new Map<string, XpcTask>();
+  /** handleName → SubscriberEntry[] */
+  private subscribers = new Map<string, SubscriberEntry[]>();
+  /** main-process subscriber callbacks: handleName → callback */
+  private mainSubscriberCallbacks = new Map<string, (payload: XpcPayload) => void>();
 
   init(): void {
     this.setupListeners();
@@ -37,7 +49,7 @@ class XpcCenter {
    * Register a main-process handleName in the registry with webContentsId = 0.
    */
   registerMainHandler(handleName: string): void {
-    this.registry.set(handleName, { type: 'renderer', id: 0 });
+    this.registry.set(handleName, { type: 'main', id: 0 });
   }
 
   /**
@@ -82,8 +94,8 @@ class XpcCenter {
       params,
     };
 
-    // Main process handler (type: renderer, id: 0)
-    if (entry.type === 'renderer' && entry.id === 0) {
+    // Main process handler
+    if (entry.type === 'main') {
       const handler = xpcMain.getHandler(handleName);
       if (!handler) {
         return null;
@@ -141,6 +153,81 @@ class XpcCenter {
     return task.toPayload().ret ?? null;
   }
 
+  /**
+   * Find the portId for a given MessagePortMain instance.
+   * Returns undefined if not found.
+   */
+  findPortId(port: MessagePortMain): string | undefined {
+    for (const [portId, p] of this.port2Map.entries()) {
+      if (p === port) return portId;
+    }
+    return undefined;
+  }
+
+  /**
+   * Add a subscriber for a handleName. Prevents duplicate entries.
+   */
+  addSubscriber(handleName: string, entry: SubscriberEntry): void {
+    let list = this.subscribers.get(handleName);
+    if (!list) {
+      list = [];
+      this.subscribers.set(handleName, list);
+    }
+    // Prevent duplicate
+    const exists = list.some(s => s.type === entry.type && s.id === entry.id);
+    if (!exists) {
+      list.push(entry);
+    }
+  }
+
+  /**
+   * Register a main-process subscriber callback.
+   */
+  registerMainSubscriber(handleName: string, callback: (payload: XpcPayload) => void): void {
+    this.addSubscriber(handleName, { type: 'main', id: 0 });
+    this.mainSubscriberCallbacks.set(handleName, callback);
+  }
+
+  /**
+   * Broadcast to all subscribers of a handleName, excluding the sender.
+   * Fire-and-forget: does not wait for subscriber responses.
+   */
+  broadcast(handleName: string, params: any, sender: SubscriberEntry): void {
+    const list = this.subscribers.get(handleName);
+    if (!list || list.length === 0) return;
+
+    const payload: XpcPayload = {
+      id: generateXpcId(),
+      handleName,
+      params,
+    };
+
+    for (const sub of list) {
+      // Skip the sender
+      if (sub.type === sender.type && sub.id === sender.id) continue;
+
+      if (sub.type === 'main') {
+        const callback = this.mainSubscriberCallbacks.get(handleName);
+        if (callback) {
+          try { callback(payload); } catch (_e) { /* ignore */ }
+        }
+      } else if (sub.type === 'renderer') {
+        const target = webContents.fromId(sub.id as number);
+        if (target && !target.isDestroyed() && !target.isCrashed()) {
+          target.send(XPC_BROADCAST_DISPATCH, payload);
+        }
+      } else if (sub.type === 'port') {
+        const port2 = this.port2Map.get(sub.id as string);
+        if (port2) {
+          port2.postMessage({
+            type: XPC_BROADCAST_DISPATCH,
+            payload,
+          });
+        }
+      }
+    }
+  }
+
   private setupListeners(): void {
     // Renderer registers a handleName (overwrites previous registration for the same handleName)
     ipcMain.on(XPC_REGISTER, (event, payload: { handleName: string }) => {
@@ -163,6 +250,16 @@ class XpcCenter {
         task.ret = payload.ret ?? null;
         task.unblock();
       }
+    });
+
+    // Renderer subscribes to a handleName
+    ipcMain.on(XPC_SUBSCRIBE, (event, payload: { handleName: string }) => {
+      this.addSubscriber(payload.handleName, { type: 'renderer', id: event.sender.id });
+    });
+
+    // Renderer requests broadcast
+    ipcMain.on(XPC_BROADCAST, (event, payload: { handleName: string; params?: any }) => {
+      this.broadcast(payload.handleName, payload.params, { type: 'renderer', id: event.sender.id });
     });
   }
 }

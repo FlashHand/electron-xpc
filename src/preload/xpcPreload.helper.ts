@@ -5,11 +5,18 @@ import { generateXpcId } from './xpcId.helper';
 const XPC_REGISTER = '__xpc_register__';
 const XPC_EXEC = '__xpc_exec__';
 const XPC_FINISH = '__xpc_finish__';
+const XPC_SUBSCRIBE = '__xpc_subscribe__';
+const XPC_BROADCAST = '__xpc_broadcast__';
+const XPC_BROADCAST_DISPATCH = '__xpc_broadcast_dispatch__';
 
 type XpcHandler = (payload: XpcPayload) => Promise<any>;
 
 /** Global handlers map, extracted from XpcRenderer class */
 export const xpcHandlers = new Map<string, XpcHandler>();
+
+/** Global subscriber callbacks: handleName → callback */
+const xpcSubscribers = new Map<string, (payload: XpcPayload) => void>();
+let broadcastDispatchListenerSetup = false;
 
 export type { XpcRendererApi } from '../shared/xpc.type';
 
@@ -75,6 +82,36 @@ const send = async (handleName: string, params?: any): Promise<any> => {
 };
 
 /**
+ * Subscribe to a handleName. When another process broadcasts to this handleName,
+ * the callback will be invoked with the full XpcPayload.
+ */
+const subscribe = (handleName: string, callback: (payload: XpcPayload) => void): void => {
+  xpcSubscribers.set(handleName, callback);
+
+  // Notify main process about this subscription
+  ipcRenderer.send(XPC_SUBSCRIBE, { handleName });
+
+  // Setup broadcast dispatch listener once
+  if (!broadcastDispatchListenerSetup) {
+    broadcastDispatchListenerSetup = true;
+    ipcRenderer.on(XPC_BROADCAST_DISPATCH, (_event, payload: XpcPayload) => {
+      const cb = xpcSubscribers.get(payload.handleName);
+      if (cb) {
+        try { cb(payload); } catch (_e) { /* ignore */ }
+      }
+    });
+  }
+};
+
+/**
+ * Broadcast to all subscribers of a handleName, excluding this renderer (self).
+ * Fire-and-forget: does not wait for subscriber responses.
+ */
+const broadcast = (handleName: string, params?: any): void => {
+  ipcRenderer.send(XPC_BROADCAST, { handleName, params });
+};
+
+/**
  * Returns a contextBridge-safe object for exposeInMainWorld.
  */
 const createXpcRendererApi = (): XpcRendererApi => {
@@ -87,6 +124,12 @@ const createXpcRendererApi = (): XpcRendererApi => {
     },
     send: (handleName: string, params?: any): Promise<any> => {
       return send(handleName, params);
+    },
+    subscribe: (handleName: string, callback: (payload: XpcPayload) => void): void => {
+      subscribe(handleName, callback);
+    },
+    broadcast: (handleName: string, params?: any): void => {
+      broadcast(handleName, params);
     },
   };
 };

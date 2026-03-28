@@ -15,7 +15,12 @@ var generateXpcId = () => {
 var XPC_REGISTER = "__xpc_register__";
 var XPC_EXEC = "__xpc_exec__";
 var XPC_FINISH = "__xpc_finish__";
+var XPC_SUBSCRIBE = "__xpc_subscribe__";
+var XPC_BROADCAST = "__xpc_broadcast__";
+var XPC_BROADCAST_DISPATCH = "__xpc_broadcast_dispatch__";
 var xpcHandlers = /* @__PURE__ */ new Map();
+var xpcSubscribers = /* @__PURE__ */ new Map();
+var broadcastDispatchListenerSetup = false;
 var handle = (handleName, handler) => {
   if (xpcHandlers.has(handleName)) {
     electron.ipcRenderer.removeAllListeners(handleName);
@@ -53,6 +58,25 @@ var send = async (handleName, params) => {
   };
   return await electron.ipcRenderer.invoke(XPC_EXEC, payload);
 };
+var subscribe = (handleName, callback) => {
+  xpcSubscribers.set(handleName, callback);
+  electron.ipcRenderer.send(XPC_SUBSCRIBE, { handleName });
+  if (!broadcastDispatchListenerSetup) {
+    broadcastDispatchListenerSetup = true;
+    electron.ipcRenderer.on(XPC_BROADCAST_DISPATCH, (_event, payload) => {
+      const cb = xpcSubscribers.get(payload.handleName);
+      if (cb) {
+        try {
+          cb(payload);
+        } catch (_e) {
+        }
+      }
+    });
+  }
+};
+var broadcast = (handleName, params) => {
+  electron.ipcRenderer.send(XPC_BROADCAST, { handleName, params });
+};
 var createXpcRendererApi = () => {
   return {
     handle: (handleName, handler) => {
@@ -63,6 +87,12 @@ var createXpcRendererApi = () => {
     },
     send: (handleName, params) => {
       return send(handleName, params);
+    },
+    subscribe: (handleName, callback) => {
+      subscribe(handleName, callback);
+    },
+    broadcast: (handleName, params) => {
+      broadcast(handleName, params);
     }
   };
 };

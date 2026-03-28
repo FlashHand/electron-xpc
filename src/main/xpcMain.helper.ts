@@ -6,6 +6,9 @@ type XpcHandler = (payload: XpcPayload) => Promise<any>;
 
 const XPC_REGISTER = '__xpc_register__';
 const XPC_FINISH = '__xpc_finish__';
+const XPC_SUBSCRIBE = '__xpc_subscribe__';
+const XPC_BROADCAST = '__xpc_broadcast__';
+const XPC_BROADCAST_DISPATCH = '__xpc_broadcast_dispatch__';
 
 /**
  * XpcMain: runs in the main process.
@@ -38,6 +41,22 @@ class XpcMain {
    */
   async send(handleName: string, params?: any): Promise<any> {
     return xpcCenter.exec(handleName, params);
+  }
+
+  /**
+   * Subscribe to a handleName in the main process.
+   * The callback will be invoked when another process broadcasts to this handleName.
+   */
+  subscribe(handleName: string, callback: (payload: XpcPayload) => void): void {
+    xpcCenter.registerMainSubscriber(handleName, callback);
+  }
+
+  /**
+   * Broadcast to all subscribers of a handleName, excluding the main process (self).
+   * Fire-and-forget: does not wait for subscriber responses.
+   */
+  broadcast(handleName: string, params?: any): void {
+    xpcCenter.broadcast(handleName, params, { type: 'main', id: 0 });
   }
 }
 
@@ -121,6 +140,23 @@ export function createUtilityProcess(options: UtilityProcessOptions): XpcUtility
     if (type === XPC_FINISH && payload) {
       // Forward finish to xpcCenter for tasks initiated by renderer processes
       xpcCenter.handleUtilityFinish(payload);
+    }
+
+    if (type === XPC_SUBSCRIBE && handleName) {
+      // Utility process subscribes — find existing portId or register new one
+      let portId = xpcCenter.findPortId(port2);
+      if (!portId) {
+        portId = xpcCenter.registerPortHandler(handleName, port2);
+      }
+      xpcCenter.addSubscriber(handleName, { type: 'port', id: portId });
+    }
+
+    if (type === XPC_BROADCAST && payload) {
+      // Utility process requests broadcast — identify sender by portId
+      const senderPortId = xpcCenter.findPortId(port2);
+      if (senderPortId) {
+        xpcCenter.broadcast(payload.handleName, payload.params, { type: 'port', id: senderPortId });
+      }
     }
   });
 

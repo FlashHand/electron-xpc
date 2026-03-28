@@ -1,4 +1,5 @@
 export { xpcCenter } from './xpcCenter.helper';
+export type { SubscriberEntry } from './xpcCenter.helper';
 export { xpcMain, createUtilityProcess } from './xpcMain.helper';
 export { XpcTask } from './xpcTask.helper';
 export { XpcMainHandler } from './xpcMain.handler';

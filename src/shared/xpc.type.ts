@@ -13,4 +13,6 @@ export type XpcRendererApi = {
   handle: (handleName: string, handler: (payload: XpcPayload) => Promise<any>) => void;
   removeHandle: (handleName: string) => void;
   send: (handleName: string, params?: any) => Promise<any>;
+  subscribe: (handleName: string, callback: (payload: XpcPayload) => void) => void;
+  broadcast: (handleName: string, params?: any) => void;
 };

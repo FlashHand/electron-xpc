@@ -14,6 +14,8 @@ interface XpcUtilityProcessApi {
     handle: (handleName: string, handler: (payload: XpcPayload) => Promise<any>) => void;
     removeHandle: (handleName: string) => void;
     send: (handleName: string, params?: any) => Promise<any>;
+    subscribe: (handleName: string, callback: (payload: XpcPayload) => void) => void;
+    broadcast: (handleName: string, params?: any) => void;
 }
 /**
  * XpcUtilityProcess: runs in utility process.
@@ -25,6 +27,8 @@ declare class XpcUtilityProcess implements XpcUtilityProcessApi {
     private handlers;
     private pendingTasks;
     private pendingHandlers;
+    private subscriberCallbacks;
+    private pendingSubscribers;
     /**
      * Initialize with a MessagePort from the main process.
      * Must be called before using handle() or send().
@@ -41,6 +45,17 @@ declare class XpcUtilityProcess implements XpcUtilityProcessApi {
      * Remove a registered handler.
      */
     removeHandle(handleName: string): void;
+    /**
+     * Subscribe to a handleName. When another process broadcasts to this handleName,
+     * the callback will be invoked with the full XpcPayload.
+     */
+    subscribe(handleName: string, callback: (payload: XpcPayload) => void): void;
+    private registerSubscriber;
+    /**
+     * Broadcast to all subscribers of a handleName, excluding this utility process (self).
+     * Fire-and-forget: does not wait for subscriber responses.
+     */
+    broadcast(handleName: string, params?: any): void;
     /**
      * Send a message to main process (or another registered handler) via MessagePort.
      * Uses semaphore to block until the target finishes and returns the result.

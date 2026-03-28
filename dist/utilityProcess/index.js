@@ -15,6 +15,9 @@ var generateXpcId = () => {
 var XPC_REGISTER = "__xpc_register__";
 var XPC_EXEC = "__xpc_exec__";
 var XPC_FINISH = "__xpc_finish__";
+var XPC_SUBSCRIBE = "__xpc_subscribe__";
+var XPC_BROADCAST = "__xpc_broadcast__";
+var XPC_BROADCAST_DISPATCH = "__xpc_broadcast_dispatch__";
 var XpcUtilityProcess = class {
   constructor() {
     this.port = null;
@@ -22,6 +25,8 @@ var XpcUtilityProcess = class {
     this.handlers = /* @__PURE__ */ new Map();
     this.pendingTasks = /* @__PURE__ */ new Map();
     this.pendingHandlers = [];
+    this.subscriberCallbacks = /* @__PURE__ */ new Map();
+    this.pendingSubscribers = [];
   }
   /**
    * Initialize with a MessagePort from the main process.
@@ -35,6 +40,10 @@ var XpcUtilityProcess = class {
       this.registerHandler(handleName, handler);
     }
     this.pendingHandlers = [];
+    for (const { handleName, callback } of this.pendingSubscribers) {
+      this.registerSubscriber(handleName, callback);
+    }
+    this.pendingSubscribers = [];
   }
   /**
    * Register a handler for incoming messages with the given handleName.
@@ -63,6 +72,42 @@ var XpcUtilityProcess = class {
    */
   removeHandle(handleName) {
     this.handlers.delete(handleName);
+  }
+  /**
+   * Subscribe to a handleName. When another process broadcasts to this handleName,
+   * the callback will be invoked with the full XpcPayload.
+   */
+  subscribe(handleName, callback) {
+    if (!this.port) {
+      this.pendingSubscribers.push({ handleName, callback });
+      return;
+    }
+    this.registerSubscriber(handleName, callback);
+  }
+  registerSubscriber(handleName, callback) {
+    this.subscriberCallbacks.set(handleName, callback);
+    this.port?.postMessage({
+      type: XPC_SUBSCRIBE,
+      handleName
+    });
+  }
+  /**
+   * Broadcast to all subscribers of a handleName, excluding this utility process (self).
+   * Fire-and-forget: does not wait for subscriber responses.
+   */
+  broadcast(handleName, params) {
+    if (!this.port) {
+      throw new Error("[xpcUtilityProcess] MessagePort not initialized. Call init() first.");
+    }
+    const payload = {
+      id: generateXpcId(),
+      handleName,
+      params
+    };
+    this.port.postMessage({
+      type: XPC_BROADCAST,
+      payload
+    });
   }
   /**
    * Send a message to main process (or another registered handler) via MessagePort.
@@ -122,6 +167,15 @@ var XpcUtilityProcess = class {
         if (taskInfo) {
           taskInfo.ret = payload.ret ?? null;
           taskInfo.semaphore.leave();
+        }
+      }
+      if (type === XPC_BROADCAST_DISPATCH && payload) {
+        const cb = this.subscriberCallbacks.get(payload.handleName);
+        if (cb) {
+          try {
+            cb(payload);
+          } catch (_e) {
+          }
         }
       }
     });

@@ -11,6 +11,10 @@ type XpcPayload = {
     ret?: any;
 };
 
+interface SubscriberEntry {
+    type: 'main' | 'renderer' | 'port';
+    id: number | string;
+}
 /**
  * XpcCenter: runs in the main process.
  * - Listens for __xpc_register__: renderer registers a handleName, center stores {handleName → webContentsId}
@@ -25,6 +29,10 @@ declare class XpcCenter {
     private port2Map;
     /** task.id → XpcTask (with semaphore block/unblock) */
     private pendingTasks;
+    /** handleName → SubscriberEntry[] */
+    private subscribers;
+    /** main-process subscriber callbacks: handleName → callback */
+    private mainSubscriberCallbacks;
     init(): void;
     /**
      * Register a main-process handleName in the registry with webContentsId = 0.
@@ -48,6 +56,24 @@ declare class XpcCenter {
      * Used by both ipcMain.handle(XPC_EXEC) and xpcMain.send().
      */
     exec(handleName: string, params?: any): Promise<any>;
+    /**
+     * Find the portId for a given MessagePortMain instance.
+     * Returns undefined if not found.
+     */
+    findPortId(port: MessagePortMain): string | undefined;
+    /**
+     * Add a subscriber for a handleName. Prevents duplicate entries.
+     */
+    addSubscriber(handleName: string, entry: SubscriberEntry): void;
+    /**
+     * Register a main-process subscriber callback.
+     */
+    registerMainSubscriber(handleName: string, callback: (payload: XpcPayload) => void): void;
+    /**
+     * Broadcast to all subscribers of a handleName, excluding the sender.
+     * Fire-and-forget: does not wait for subscriber responses.
+     */
+    broadcast(handleName: string, params: any, sender: SubscriberEntry): void;
     private setupListeners;
 }
 declare const xpcCenter: XpcCenter;
@@ -75,6 +101,16 @@ declare class XpcMain {
      * Delegates to xpcCenter.exec() which handles both main-process and renderer targets.
      */
     send(handleName: string, params?: any): Promise<any>;
+    /**
+     * Subscribe to a handleName in the main process.
+     * The callback will be invoked when another process broadcasts to this handleName.
+     */
+    subscribe(handleName: string, callback: (payload: XpcPayload) => void): void;
+    /**
+     * Broadcast to all subscribers of a handleName, excluding the main process (self).
+     * Fire-and-forget: does not wait for subscriber responses.
+     */
+    broadcast(handleName: string, params?: any): void;
 }
 declare const xpcMain: XpcMain;
 interface UtilityProcessOptions {
@@ -228,4 +264,4 @@ declare const createXpcMainEmitter: <T>(className: string) => XpcEmitterOf<T>;
  */
 declare const xpcIgnore: (target: any, propertyKey: string) => void;
 
-export { type UtilityProcessOptions, type XpcEmitterOf, XpcMainHandler, type XpcPayload, XpcTask, type XpcUtilityProcess, createUtilityProcess, createXpcMainEmitter, xpcCenter, xpcIgnore, xpcMain };
+export { type SubscriberEntry, type UtilityProcessOptions, type XpcEmitterOf, XpcMainHandler, type XpcPayload, XpcTask, type XpcUtilityProcess, createUtilityProcess, createXpcMainEmitter, xpcCenter, xpcIgnore, xpcMain };
