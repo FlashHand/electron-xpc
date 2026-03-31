@@ -347,49 +347,6 @@ Renderer / Main                Main Process (xpcCenter)         Utility Process
 
 ---
 
-## Usage C: Subscribe / Broadcast
-
-One-to-many fire-and-forget messaging. Any process can subscribe to an event name, and any process can broadcast to it. **The broadcaster will NOT receive its own message.**
-
-### Main Process — Subscribe
-
-```ts
-import { xpcMain } from 'electron-xpc/main';
-
-xpcMain.subscribe('dataUpdated', (payload) => {
-  console.log('[main] dataUpdated received:', payload.params);
-});
-```
-
-### Renderer / Preload — Subscribe
-
-```ts
-import { xpcRenderer } from 'electron-xpc/renderer'; // or 'electron-xpc/preload'
-
-xpcRenderer.subscribe('dataUpdated', (payload) => {
-  console.log('[renderer] dataUpdated received:', payload.params);
-});
-```
-
-### Renderer / Preload — Broadcast
-
-```ts
-import { xpcRenderer } from 'electron-xpc/renderer'; // or 'electron-xpc/preload'
-
-// All subscribers in other processes will receive this; the sender will not.
-xpcRenderer.broadcast('dataUpdated', { source: 'user-action' });
-```
-
-### Main Process — Broadcast
-
-```ts
-import { xpcMain } from 'electron-xpc/main';
-
-xpcMain.broadcast('dataUpdated', { source: 'background-sync' });
-```
-
----
-
 ## Architecture
 
 ### Communication Flow

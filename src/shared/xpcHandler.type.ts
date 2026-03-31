@@ -11,12 +11,12 @@ export const XPC_HANDLER_PREFIX = 'xpc:';
  * e.g. buildChannel('UserTable', 'getUserList') => 'xpc:UserTable/getUserList'
  */
 export const buildXpcChannel = (className: string, methodName: string): string => {
-  return `${XPC_HANDLER_PREFIX}${className}/${methodName}`;
+  return `${className}/${methodName}`;
 };
 
 /**
  * Extract own method names from a class prototype, excluding constructor.
- * 
+ *
  * Methods are ignored if:
  * 1. Name starts with `_` or `$` (private method convention)
  * 2. Marked with @xpcIgnore decorator
@@ -26,15 +26,15 @@ export const getHandlerMethodNames = (prototype: object): string[] => {
   const keys = Object.getOwnPropertyNames(prototype);
   for (const key of keys) {
     if (key === 'constructor') continue;
-    
+
     // Skip methods starting with _ or $
     if (key.startsWith('_') || key.startsWith('$')) continue;
-    
+
     const descriptor = Object.getOwnPropertyDescriptor(prototype, key);
     if (descriptor && typeof descriptor.value === 'function') {
       // Skip methods marked with @xpcIgnore
       if (descriptor.value[XPC_IGNORE]) continue;
-      
+
       names.push(key);
     }
   }

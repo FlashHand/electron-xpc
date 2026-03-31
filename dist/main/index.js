@@ -348,9 +348,8 @@ var xpcIgnore = (target, propertyKey) => {
 };
 
 // src/shared/xpcHandler.type.ts
-var XPC_HANDLER_PREFIX = "xpc:";
 var buildXpcChannel = (className, methodName) => {
-  return `${XPC_HANDLER_PREFIX}${className}/${methodName}`;
+  return `${className}/${methodName}`;
 };
 var getHandlerMethodNames = (prototype) => {
   const names = [];
