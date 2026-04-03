@@ -31,7 +31,8 @@ var handle = (handleName, handler) => {
     if (localHandler) {
       try {
         ret = await localHandler(payload);
-      } catch (_e) {
+      } catch (error) {
+        console.error("[xpcPreload.helper] error in", handleName, error);
         ret = null;
       }
     }
@@ -142,7 +143,12 @@ var XpcPreloadHandler = class {
       const channel = buildXpcChannel(className, methodName);
       const method = this[methodName].bind(this);
       xpcRenderer.handle(channel, async (payload) => {
-        return await method(payload.params);
+        try {
+          return await method(payload.params);
+        } catch (error) {
+          console.error("[XpcPreloadHandler] error in", channel, error);
+          return null;
+        }
       });
     }
   }

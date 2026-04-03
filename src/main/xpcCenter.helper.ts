@@ -102,7 +102,8 @@ class XpcCenter {
       }
       try {
         return await handler(payload);
-      } catch (_e) {
+      } catch (error) {
+        console.error('[xpcCenter] error in main handler', handleName, error);
         return null;
       }
     }

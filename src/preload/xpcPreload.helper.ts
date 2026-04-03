@@ -43,7 +43,8 @@ const handle = (handleName: string, handler: XpcHandler): void => {
     if (localHandler) {
       try {
         ret = await localHandler(payload);
-      } catch (_e) {
+      } catch (error) {
+        console.error('[xpcPreload.helper] error in', handleName, error);
         ret = null;
       }
     }

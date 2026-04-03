@@ -208,6 +208,54 @@ await notifyEmitter.showToast({ text: 'Hello!' });
 
 ---
 
+## Broadcast & Subscribe
+
+Fire-and-forget one-to-many notifications for event-driven communication.
+
+### Key Rules
+
+1. **The sender does NOT receive its own broadcast**
+2. **Subscribers receive `payload.params`, not direct params**
+
+### Main Process
+
+```ts
+import { xpcMain } from 'electron-xpc/main';
+
+// Broadcast to all renderer windows (main won't receive this)
+xpcMain.broadcast('language/changed', { lang: 'en' });
+
+// Subscribe to renderer broadcasts
+xpcMain.subscribe('language/changed', (payload) => {
+  const { lang } = payload.params;  // Access via payload.params
+  console.log('Language:', lang);
+});
+```
+
+### Renderer Process
+
+```ts
+import { xpcRenderer } from 'electron-xpc/renderer';
+
+// Broadcast to all OTHER renderers + main (sender won't receive)
+xpcRenderer.broadcast('language/changed', { lang: 'zh' });
+
+// Subscribe to broadcasts from main or other renderers
+xpcRenderer.subscribe('language/changed', (payload) => {
+  const { lang } = payload.params;  // Access via payload.params
+  console.log('Language:', lang);
+});
+```
+
+### Receivers Table
+
+| Sender | API | Receivers |
+|---|---|---|
+| Main | `xpcMain.broadcast(event, params)` | All renderer windows (NOT main) |
+| Renderer | `xpcRenderer.broadcast(event, params)` | All OTHER renderers + main (NOT sender) |
+
+---
+
 ## Utility Process
 
 Electron's [Utility Process](https://www.electronjs.org/docs/latest/api/utility-process) runs in a sandboxed Node.js environment, ideal for CPU-intensive or I/O-heavy work. `electron-xpc` integrates utility processes into the same XPC communication fabric — any renderer or main process can call a utility process handler using the same `send()` API.

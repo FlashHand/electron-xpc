@@ -210,7 +210,8 @@ var XpcCenter = class {
       }
       try {
         return await handler(payload);
-      } catch (_e) {
+      } catch (error) {
+        console.error("[xpcCenter] error in main handler", handleName, error);
         return null;
       }
     }
@@ -375,7 +376,12 @@ var XpcMainHandler = class {
       const channel = buildXpcChannel(className, methodName);
       const method = this[methodName].bind(this);
       xpcMain.handle(channel, async (payload) => {
-        return await method(payload.params);
+        try {
+          return await method(payload.params);
+        } catch (error) {
+          console.error("[XpcMainHandler] error in", channel, error);
+          return null;
+        }
       });
     }
   }

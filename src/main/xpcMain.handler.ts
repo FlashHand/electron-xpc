@@ -38,7 +38,12 @@ export class XpcMainHandler {
       const channel = buildXpcChannel(className, methodName);
       const method = (this as any)[methodName].bind(this);
       xpcMain.handle(channel, async (payload: XpcPayload) => {
-        return await method(payload.params);
+        try {
+          return await method(payload.params);
+        } catch (error) {
+          console.error('[XpcMainHandler] error in', channel, error);
+          return null;
+        }
       });
     }
   }
