@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>electron-xpc harness</title>
+  <style>
+    :root {
+      --bg: oklch(0.21 0.02 265);
+      --panel: oklch(0.26 0.02 265);
+      --line: oklch(0.34 0.02 265);
+      --text: oklch(0.93 0.01 265);
+      --muted: oklch(0.68 0.02 265);
+      --accent: oklch(0.62 0.19 264);
+      --pass: oklch(0.74 0.18 150);
+      --fail: oklch(0.68 0.20 25);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font: 13px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
+    }
+
+    .harness__header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .harness__header__title { font-weight: 600; margin-right: auto; }
+
+    .harness__body {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .harness__cases {
+      width: 330px;
+      flex: none;
+      overflow-y: auto;
+      padding: 8px;
+      border-right: 1px solid var(--line);
+    }
+    .harness__cases__group {
+      margin: 12px 0 6px;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .harness__cases__group:first-child { margin-top: 0; }
+
+    .harness__log {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .harness__log__head {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 6px 12px;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--line);
+    }
+    .harness__log__lines {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      padding: 8px 12px;
+      font-family: "SF Mono", ui-monospace, Menlo, monospace;
+      font-size: 12px;
+      white-space: pre;
+    }
+    .harness__log__line__src { display: inline-block; width: 96px; color: var(--accent); }
+    .harness__log__line--main    .harness__log__line__src { color: oklch(0.74 0.14 264); }
+    .harness__log__line--rend    .harness__log__line__src { color: oklch(0.80 0.14 90); }
+    .harness__log__line--util    .harness__log__line__src { color: oklch(0.76 0.14 160); }
+    .harness__log__line--fail    { color: var(--fail); }
+    .harness__log__line--pass    { color: var(--pass); }
+    .harness__log__line__time { color: var(--muted); }
+
+    .harness__results {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 12px;
+      border-top: 1px solid var(--line);
+      font-family: "SF Mono", ui-monospace, Menlo, monospace;
+      font-size: 12px;
+    }
+    .harness__results__label {
+      color: var(--muted);
+      font-family: inherit;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-size: 11px;
+    }
+    .harness__results__cell--pass { color: var(--pass); }
+    .harness__results__cell--fail { color: var(--fail); }
+    .harness__results__cell--idle { color: var(--muted); }
+
+    button {
+      font: inherit;
+      color: var(--text);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 6px 10px;
+      cursor: pointer;
+      text-align: left;
+    }
+    button:hover:not(:disabled) { border-color: var(--accent); }
+    button:disabled { opacity: 0.4; cursor: default; }
+    .harness__cases button { display: block; width: 100%; margin-bottom: 4px; }
+    .harness__header button { flex: none; }
+    .harness__case__id { display: inline-block; width: 34px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="harness__header" name="harness__header">
+    <span class="harness__header__title">electron-xpc harness — utility XPC</span>
+    <button name="harness__run_all" id="runAll">Run all</button>
+    <button name="harness__clear" id="clearLog">Clear log</button>
+  </div>
+
+  <div class="harness__body">
+    <div class="harness__cases" name="harness__cases" id="cases"></div>
+
+    <div class="harness__log" name="harness__log">
+      <div class="harness__log__head">
+        <span>log</span>
+        <span id="logCount"></span>
+      </div>
+      <div class="harness__log__lines" name="harness__log__lines" id="logLines"></div>
+    </div>
+  </div>
+
+  <div class="harness__results" name="harness__results">
+    <span class="harness__results__label">results</span>
+    <span id="results"></span>
+  </div>
+
+  <script src="./renderer.js"></script>
+</body>
+</html>

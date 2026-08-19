@@ -51,6 +51,8 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
+    "test:app": "yarn build && electron test/main.js",
+    "test:auto": "yarn build && electron test/main.js --auto",
     "prepublishOnly": "yarn build",
     "publish:npm": "npm publish --registry=https://registry.npmjs.org/"
   },
