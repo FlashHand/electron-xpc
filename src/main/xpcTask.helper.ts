@@ -6,6 +6,12 @@ export class XpcTask implements XpcPayload {
   handleName: string;
   params?: any;
   ret?: any;
+  /**
+   * portId of the utility process this task was forwarded to.
+   * Undefined for main-process and renderer targets. Set so that a utility
+   * process exiting can settle the tasks that will never be answered.
+   */
+  targetPortId?: string;
 
   private semaphore: Semaphore;
 

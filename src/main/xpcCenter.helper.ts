@@ -34,6 +34,8 @@ class XpcCenter {
   private registry = new Map<string, RegistryEntry>();
   /** port_id → MessagePortMain */
   private port2Map = new Map<string, MessagePortMain>();
+  /** MessagePortMain → port_id, reverse of port2Map for O(1) sender identification */
+  private portIdByPort = new WeakMap<MessagePortMain, string>();
   /** task.id → XpcTask (with semaphore block/unblock) */
   private pendingTasks = new Map<string, XpcTask>();
   /** handleName → SubscriberEntry[] */
@@ -53,16 +55,79 @@ class XpcCenter {
   }
 
   /**
-   * Register a utility process port handler.
-   * @param handleName - The handler name
-   * @param port2 - The MessagePort for communication
+   * Mint the identity of one utility process, exactly once, at fork time.
+   * Must be called before the port starts delivering messages, so that every
+   * subsequent register/subscribe/broadcast from that process shares one portId.
+   *
+   * Identity is deliberately NOT derived from handler registration: a utility
+   * process that only broadcasts never registers a handler, and one that
+   * registers N handlers must still be a single subscriber identity — otherwise
+   * broadcast self-exclusion compares mismatched ids.
+   *
+   * @param port2 - The main-side MessagePort for this utility process
    * @returns The generated port_id
    */
-  registerPortHandler(handleName: string, port2: MessagePortMain): string {
+  registerPort(port2: MessagePortMain): string {
+    const existing = this.portIdByPort.get(port2);
+    if (existing != null) {
+      return existing;
+    }
     const portId = randomUUID();
-    this.registry.set(handleName, { type: 'port', id: portId });
     this.port2Map.set(portId, port2);
+    this.portIdByPort.set(port2, portId);
     return portId;
+  }
+
+  /**
+   * Point a handleName at an already-registered utility process.
+   * Records ownership only — it never mints an identity.
+   *
+   * @param handleName - The handler name
+   * @param portId - The port_id returned by registerPort()
+   */
+  registerPortHandler(handleName: string, portId: string): void {
+    this.registry.set(handleName, { type: 'port', id: portId });
+  }
+
+  /**
+   * Drop every record belonging to one utility process, and settle the tasks
+   * that are waiting on it. Called when the child exits (crash included) or is
+   * killed; without it, a send() to a dead utility process would post into a
+   * closed port and park forever.
+   *
+   * Scoped strictly to this portId — other utility processes keep their routes.
+   * Idempotent, because kill() and the subsequent 'exit' event both call it.
+   */
+  unregisterPort(portId: string): void {
+    const port2 = this.port2Map.get(portId);
+    if (port2 != null) {
+      this.portIdByPort.delete(port2);
+    }
+    this.port2Map.delete(portId);
+
+    // Snapshot before mutating: deleting while iterating a Map is unsafe.
+    for (const [handleName, entry] of [...this.registry.entries()]) {
+      if (entry.type === 'port' && entry.id === portId) {
+        this.registry.delete(handleName);
+      }
+    }
+
+    for (const [handleName, list] of [...this.subscribers.entries()]) {
+      const kept = list.filter(sub => !(sub.type === 'port' && sub.id === portId));
+      if (kept.length === 0) {
+        this.subscribers.delete(handleName);
+      } else if (kept.length !== list.length) {
+        this.subscribers.set(handleName, kept);
+      }
+    }
+
+    // Settle callers that will never receive an answer.
+    for (const task of [...this.pendingTasks.values()]) {
+      if (task.targetPortId === portId) {
+        task.ret = null;
+        task.unblock();
+      }
+    }
   }
 
   /**
@@ -117,6 +182,7 @@ class XpcCenter {
 
       // Create semaphore-blocked task
       const task = new XpcTask(payload);
+      task.targetPortId = entry.id as string;
       this.pendingTasks.set(task.id, task);
 
       // Forward to utility process via MessagePort
@@ -156,13 +222,10 @@ class XpcCenter {
 
   /**
    * Find the portId for a given MessagePortMain instance.
-   * Returns undefined if not found.
+   * Returns undefined if the port was never registered via registerPort().
    */
   findPortId(port: MessagePortMain): string | undefined {
-    for (const [portId, p] of this.port2Map.entries()) {
-      if (p === port) return portId;
-    }
-    return undefined;
+    return this.portIdByPort.get(port);
   }
 
   /**

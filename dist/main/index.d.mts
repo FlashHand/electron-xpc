@@ -27,6 +27,8 @@ declare class XpcCenter {
     private registry;
     /** port_id → MessagePortMain */
     private port2Map;
+    /** MessagePortMain → port_id, reverse of port2Map for O(1) sender identification */
+    private portIdByPort;
     /** task.id → XpcTask (with semaphore block/unblock) */
     private pendingTasks;
     /** handleName → SubscriberEntry[] */
@@ -39,12 +41,37 @@ declare class XpcCenter {
      */
     registerMainHandler(handleName: string): void;
     /**
-     * Register a utility process port handler.
-     * @param handleName - The handler name
-     * @param port2 - The MessagePort for communication
+     * Mint the identity of one utility process, exactly once, at fork time.
+     * Must be called before the port starts delivering messages, so that every
+     * subsequent register/subscribe/broadcast from that process shares one portId.
+     *
+     * Identity is deliberately NOT derived from handler registration: a utility
+     * process that only broadcasts never registers a handler, and one that
+     * registers N handlers must still be a single subscriber identity — otherwise
+     * broadcast self-exclusion compares mismatched ids.
+     *
+     * @param port2 - The main-side MessagePort for this utility process
      * @returns The generated port_id
      */
-    registerPortHandler(handleName: string, port2: MessagePortMain): string;
+    registerPort(port2: MessagePortMain): string;
+    /**
+     * Point a handleName at an already-registered utility process.
+     * Records ownership only — it never mints an identity.
+     *
+     * @param handleName - The handler name
+     * @param portId - The port_id returned by registerPort()
+     */
+    registerPortHandler(handleName: string, portId: string): void;
+    /**
+     * Drop every record belonging to one utility process, and settle the tasks
+     * that are waiting on it. Called when the child exits (crash included) or is
+     * killed; without it, a send() to a dead utility process would post into a
+     * closed port and park forever.
+     *
+     * Scoped strictly to this portId — other utility processes keep their routes.
+     * Idempotent, because kill() and the subsequent 'exit' event both call it.
+     */
+    unregisterPort(portId: string): void;
     /**
      * Handle finish message from utility process.
      * Called by xpcMain when utility process sends XPC_FINISH.
@@ -58,7 +85,7 @@ declare class XpcCenter {
     exec(handleName: string, params?: any): Promise<any>;
     /**
      * Find the portId for a given MessagePortMain instance.
-     * Returns undefined if not found.
+     * Returns undefined if the port was never registered via registerPort().
      */
     findPortId(port: MessagePortMain): string | undefined;
     /**
@@ -160,6 +187,12 @@ declare class XpcTask implements XpcPayload {
     handleName: string;
     params?: any;
     ret?: any;
+    /**
+     * portId of the utility process this task was forwarded to.
+     * Undefined for main-process and renderer targets. Set so that a utility
+     * process exiting can settle the tasks that will never be answered.
+     */
+    targetPortId?: string;
     private semaphore;
     constructor(payload: XpcPayload);
     /** Block until unblock() is called */

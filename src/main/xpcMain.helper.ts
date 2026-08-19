@@ -5,10 +5,10 @@ import { xpcCenter } from './xpcCenter.helper';
 type XpcHandler = (payload: XpcPayload) => Promise<any>;
 
 const XPC_REGISTER = '__xpc_register__';
+const XPC_EXEC = '__xpc_exec__';
 const XPC_FINISH = '__xpc_finish__';
 const XPC_SUBSCRIBE = '__xpc_subscribe__';
 const XPC_BROADCAST = '__xpc_broadcast__';
-const XPC_BROADCAST_DISPATCH = '__xpc_broadcast_dispatch__';
 
 /**
  * XpcMain: runs in the main process.
@@ -108,7 +108,13 @@ export function createUtilityProcess(options: UtilityProcessOptions): XpcUtility
   const { modulePath, args, env, execArgv, serviceName } = options;
 
   const { port1, port2 } = new MessageChannelMain();
-  
+
+  // Mint this utility process's identity once, before any message can arrive.
+  // Every register/subscribe/broadcast below reuses it, so the process is a
+  // single subscriber identity regardless of how many handlers it registers —
+  // and a process that registers none still has an identity to broadcast with.
+  const portId = xpcCenter.registerPort(port2);
+
   const forkOptions: any = {
     stdio: 'pipe',
   };
@@ -131,10 +137,25 @@ export function createUtilityProcess(options: UtilityProcessOptions): XpcUtility
     const message = event.data;
     const { type, payload, handleName } = message;
 
-    if (type === XPC_REGISTER) {
+    if (type === XPC_REGISTER && handleName) {
       console.log(`[xpcMain] Utility process registered handler: ${handleName}`);
       // Register with xpcCenter so other processes can call this handler
-      xpcCenter.registerPortHandler(handleName, port2);
+      xpcCenter.registerPortHandler(handleName, portId);
+    }
+
+    if (type === XPC_EXEC && payload) {
+      // Utility process is invoking a handler owned by main, a renderer, another
+      // utility process, or itself. xpcCenter.exec() resolves the owner, and
+      // returns null for an unregistered handleName instead of blocking.
+      const ret = await xpcCenter.exec(payload.handleName, payload.params);
+      // The reply MUST carry payload.id — the id minted inside the utility
+      // process. exec() mints a different id for its own downstream leg; using
+      // that one would never match the utility's pending task and the caller's
+      // send() would stay parked forever.
+      port2.postMessage({
+        type: XPC_FINISH,
+        payload: { ...payload, ret: ret ?? null } as XpcPayload,
+      });
     }
 
     if (type === XPC_FINISH && payload) {
@@ -143,26 +164,30 @@ export function createUtilityProcess(options: UtilityProcessOptions): XpcUtility
     }
 
     if (type === XPC_SUBSCRIBE && handleName) {
-      // Utility process subscribes — find existing portId or register new one
-      let portId = xpcCenter.findPortId(port2);
-      if (!portId) {
-        portId = xpcCenter.registerPortHandler(handleName, port2);
-      }
+      // Subscribing is not owning: only the subscriber list is touched here.
+      // Writing the registry would steal `handleName` from whichever process
+      // actually handles it, since broadcast and send share one namespace.
       xpcCenter.addSubscriber(handleName, { type: 'port', id: portId });
     }
 
     if (type === XPC_BROADCAST && payload) {
-      // Utility process requests broadcast — identify sender by portId
-      const senderPortId = xpcCenter.findPortId(port2);
-      if (senderPortId) {
-        xpcCenter.broadcast(payload.handleName, payload.params, { type: 'port', id: senderPortId });
-      }
+      // Sender identity is the fork-time portId, so a handler-less utility
+      // process can broadcast too.
+      xpcCenter.broadcast(payload.handleName, payload.params, { type: 'port', id: portId });
     }
   });
 
   port2.start();
 
+  // Covers crashes and self-exit, not just explicit kill().
+  child.on('exit', () => {
+    xpcCenter.unregisterPort(portId);
+  });
+
   const kill = (): boolean => {
+    // Unregister before closing so pending callers settle immediately rather
+    // than waiting for the 'exit' event. unregisterPort() is idempotent.
+    xpcCenter.unregisterPort(portId);
     port2.close();
     return child.kill();
   };
