@@ -19,7 +19,8 @@ remaining asymmetry between the utility layer and the other three, and because t
 Electron projects mandate the handler/emitter pattern for all IPC, which would make this a
 prerequisite for adopting utility XPC there.
 
-Ask Ral before implementing.
+**Ral reviewed and deferred this on 2026-08-19.** Stays in the backlog; do not implement without a
+new decision.
 
 ### B2 — Withdraw registry ownership on `removeHandle()`
 
@@ -52,6 +53,20 @@ Every layer stores subscriber callbacks in a `Map<handleName, callback>`, so a s
 the same name silently replaces the first. Consistent across all four layers, so it is a design
 choice rather than a defect — but it is undocumented, and "silently replaces" is a surprising default
 for a pub/sub API. Either document it in the README or move to a callback list.
+
+### B9 — no port-readiness signal in `xpcUtilityProcess`
+
+`handle()` and `subscribe()` queue when called before the `MessagePort` arrives, but `send()` and
+`broadcast()` throw. A utility process whose *first* action is a broadcast — no handler, no
+subscription to piggyback on — therefore has no way to know when it may speak, and must retry until
+`broadcast()` stops throwing. `test/utility.js`'s `--broadcast-only` mode does exactly that, in a
+bounded 50×20ms loop.
+
+Options, cheapest first: queue `broadcast()` like `handle()` does; expose a `ready: Promise<void>`;
+or emit a `'ready'` event. Queueing is the most consistent with the existing API, since a dropped
+fire-and-forget notification is the same class of outcome as a queued registration.
+
+Surfaced while building the xpc-005 harness.
 
 ## Observations
 
