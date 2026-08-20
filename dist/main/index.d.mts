@@ -140,12 +140,18 @@ declare class XpcMain {
     broadcast(handleName: string, params?: any): void;
 }
 declare const xpcMain: XpcMain;
-interface UtilityProcessOptions {
+/**
+ * Everything Electron's `utilityProcess.fork()` accepts, plus the module to run.
+ *
+ * Extends `Electron.ForkOptions` rather than restating its fields: a hand-written
+ * subset silently drops whatever it forgot, and had already lost `cwd`, `session`
+ * and `partition`. Inheriting keeps this in step with Electron with no code change.
+ *
+ * `stdio` defaults to `'pipe'` — see createUtilityProcess() — but is overridable.
+ */
+interface UtilityProcessOptions extends Electron.ForkOptions {
     modulePath: string;
     args?: string[];
-    env?: Record<string, string>;
-    execArgv?: string[];
-    serviceName?: string;
 }
 interface XpcUtilityProcess {
     child: Electron.UtilityProcess;

@@ -68,6 +68,13 @@ fire-and-forget notification is the same class of outcome as a queued registrati
 
 Surfaced while building the xpc-005 harness.
 
+### B10 — `README_CN.md` does not ship in the npm tarball
+
+`files: ["dist"]` is an allowlist and npm only force-includes `README.md`, `LICENSE`, and
+`package.json`, so the Chinese README has always been GitHub-only. Predates this sprint. Fixing it
+means adding `README_CN.md` to `files` — a packaging decision, deliberately not taken inside xpc-006,
+whose scope was docs content.
+
 ## Observations
 
 ### B6 — `xpcId` helper duplicated three times

@@ -11,16 +11,31 @@ Analysis: [analysis/utility-xpc.md](analysis/utility-xpc.md) · Target `1.2.0`
 | [xpc-002](tasks/xpc-002.md) | port identity | R2 R3 R4 | xpc-001 | done · [review](reviews/xpc-002-1.md) |
 | [xpc-003](tasks/xpc-003.md) | utility egress | R1 | xpc-002 | done · [review](reviews/xpc-003-1.md) |
 | [xpc-004](tasks/xpc-004.md) | port lifecycle | invariant 4/6 | xpc-003 | done · [review](reviews/xpc-004-1.md) |
-| [xpc-005](tasks/xpc-005.md) | harness | R6 | xpc-004 | in-progress · [review](reviews/xpc-005-1.md) |
-| [xpc-006](tasks/xpc-006.md) | published docs | consistency | xpc-005 | pending |
+| [xpc-005](tasks/xpc-005.md) | harness | R6 | xpc-004 | done · [static](reviews/xpc-005-1.md) · [functional](reviews/xpc-005-2.md) |
+| [xpc-006](tasks/xpc-006.md) | published docs | consistency | xpc-005 | done · [review](reviews/xpc-006-1.md) |
 
 xpc-001–004 are gated on `yarn typecheck` + `yarn build` + source review. Functional evidence for
 R1–R4 (the T1–T12 matrix) arrives with xpc-005 and is **not** claimed before then.
 
-**xpc-005 is built and statically reviewed; the functional gate is unrun.** Ral runs
-`yarn test:app` and clicks **Run all** himself — an agent does not boot Electron on its own
-initiative. xpc-006 stays `pending` on purpose: its verification forbids documenting behavior the
-harness has not exercised, so the published README is not updated until the matrix is green.
+**Sprint complete — all six tasks `done`.** The T1–T12 matrix went green 12/12, run by Ral on
+2026-08-20 ([review](reviews/xpc-005-2.md)), so R1–R6 all have runtime evidence and the published
+READMEs describe measured behavior ([review](reviews/xpc-006-1.md)). `package.json` is at `1.2.0`.
+
+Remaining, and **not** part of any task: publishing to npm. That needs Ral's credentials and is his
+call.
+
+## Post-sprint, pre-release
+
+Folded into the still-unpublished `1.2.0` (npm serves `1.1.0`), so no new version number:
+
+| Change | Doc |
+|---|---|
+| `createUtilityProcess()` forwards all of Electron's `ForkOptions`; `stdio: 'pipe'` becomes an overridable default | [issue](../issues/create-utility-process-drops-fork-options.md) · [review](reviews/fork-options-1.md) |
+| README utility-process usage expanded for agent reference: complete two-file example, options table, the "not native `fork()`" rule | same review |
+
+Decided and **rejected** on 2026-08-20, recorded so they are not re-proposed without a new decision:
+a public `attachUtilityProcess(child)` primitive, and an auto-attach monkey-patch of
+`utilityProcess.fork` behind an `init()` flag. `createUtilityProcess()` stays the single entry point.
 
 ```text
 xpc-001 ──► xpc-002 ──► xpc-003 ──► xpc-004 ──► xpc-005 ──► xpc-006

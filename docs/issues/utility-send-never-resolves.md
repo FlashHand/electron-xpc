@@ -1,6 +1,6 @@
 # Issue — `xpcUtilityProcess.send()` never resolves
 
-状态：待处理 · Severity P1 · Found 2026-08-19 · Affects `1.1.0`
+状态：已修复（xpc-003，2026-08-20，T1–T4 验证） · Severity P1 · Found 2026-08-19 · Affects `1.1.0` · Fixed in `1.2.0`
 
 ## Symptom
 

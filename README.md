@@ -2,7 +2,7 @@
 
 **Async/Await** Style Cross-Process Communication, built on semaphore-based flow control.
 
-Unlike Electron's built-in `ipcRenderer.invoke` / `ipcMain.handle`, which only supports renderer-to-main request–response, XPC enables **any process** (renderer or main) to call handlers registered in **any other process** with full `async/await` semantics — including `renderer <-> renderer` and `main <-> renderer` invocations.
+Unlike Electron's built-in `ipcRenderer.invoke` / `ipcMain.handle`, which only supports renderer-to-main request–response, XPC enables **any process** (renderer, main, or utility process) to call handlers registered in **any other process** with full `async/await` semantics — including `renderer <-> renderer`, `main <-> renderer`, and `utility <-> anything` invocations.
 
 ## Install
 
@@ -22,7 +22,7 @@ npm install electron-xpc
 
 ### electron-xpc是 **Async/Await** 语法风格的跨进程通信库，基于信号量控制的方式开发
 
-不同于 Electron 内置的 `ipcRenderer.invoke` / `ipcMain.handle` 仅支持渲染进程到主进程的请求-响应模式，XPC 允许**任意进程**（渲染进程或主进程）以完整的 `async/await` 语义调用**任意其他进程**中注册的handler——包括 renderer <-> renderer 和 main <-> renderer 的调用。
+不同于 Electron 内置的 `ipcRenderer.invoke` / `ipcMain.handle` 仅支持渲染进程到主进程的请求-响应模式，XPC 允许**任意进程**（渲染进程、主进程或工具进程）以完整的 `async/await` 语义调用**任意其他进程**中注册的handler——包括 renderer <-> renderer、main <-> renderer 以及 utility <-> 任意进程 的调用。
 
 **特性：**
 
@@ -32,13 +32,14 @@ npm install electron-xpc
 
 ### Process Layers
 
-XPC distinguishes three process layers in an Electron app:
+XPC distinguishes four process layers in an Electron app:
 
 | Layer | Environment | Import Path |
 |-------|-------------|-------------|
 | **Main Layer** | Node.js main process | `electron-xpc/main` |
 | **Preload Layer** | Renderer preload script (has `electron` access) | `electron-xpc/preload` |
 | **Web Layer** | Renderer web page (no `electron` access, uses `window.xpcRenderer`) | `electron-xpc/renderer` |
+| **Utility Process Layer** | Sandboxed Node.js child process | `electron-xpc/utilityProcess` |
 
 Although preload belongs to the renderer layer, it contains an isolated Node.js context, so it is treated as a separate layer in the architecture.
 
@@ -247,12 +248,34 @@ xpcRenderer.subscribe('language/changed', (payload) => {
 });
 ```
 
+### Utility Process
+
+```ts
+import { xpcUtilityProcess } from 'electron-xpc/utilityProcess';
+
+// Broadcast to main + all renderers + all OTHER utility processes (sender won't receive)
+xpcUtilityProcess.broadcast('language/changed', { lang: 'ja' });
+
+// Subscribe to broadcasts from any other process
+xpcUtilityProcess.subscribe('language/changed', (payload) => {
+  const { lang } = payload.params;  // Access via payload.params
+  console.log('Language:', lang);
+});
+```
+
+A utility process does not need to own a single handler to take part — `subscribe()` and
+`broadcast()` work on a process whose only job is to listen or to notify.
+
 ### Receivers Table
 
 | Sender | API | Receivers |
 |---|---|---|
-| Main | `xpcMain.broadcast(event, params)` | All renderer windows (NOT main) |
-| Renderer | `xpcRenderer.broadcast(event, params)` | All OTHER renderers + main (NOT sender) |
+| Main | `xpcMain.broadcast(event, params)` | All renderer windows + all subscribed utility processes (NOT main) |
+| Renderer | `xpcRenderer.broadcast(event, params)` | All OTHER renderers + main + all subscribed utility processes (NOT sender) |
+| Utility Process | `xpcUtilityProcess.broadcast(event, params)` | Main + all renderers + all OTHER utility processes (NOT sender) |
+
+In every row the sender is excluded from its own broadcast, including the utility-process row: a
+process that broadcasts and subscribes to the same event does not hear itself.
 
 ---
 
@@ -266,6 +289,55 @@ Electron's [Utility Process](https://www.electronjs.org/docs/latest/api/utility-
 |-------|-------------|
 | **Main** (create & manage) | `electron-xpc/main` |
 | **Utility Process** (handle & send) | `electron-xpc/utilityProcess` |
+
+---
+
+### Complete Minimal Example
+
+Two files. Nothing else is required — no init call in the utility process, no manual `MessagePort`
+handling, no `parentPort` code.
+
+```ts
+// ── main.ts ─────────────────────────────────────────────────────
+import { app } from 'electron';
+import { xpcCenter, createUtilityProcess, xpcMain } from 'electron-xpc/main';
+import * as path from 'path';
+
+app.whenReady().then(async () => {
+  xpcCenter.init();                                        // once per app
+
+  createUtilityProcess({                                   // once per utility process
+    modulePath: path.join(__dirname, 'worker.js'),
+    serviceName: 'my-worker',
+  });
+
+  // main → utility
+  const sum = await xpcMain.send('worker/add', { a: 1, b: 2 });   // 3
+
+  // main → everyone subscribed (utility processes included)
+  xpcMain.broadcast('app/theme', { dark: true });
+});
+```
+
+```ts
+// ── worker.ts (the utility process) ─────────────────────────────
+import { xpcUtilityProcess } from 'electron-xpc/utilityProcess';
+
+// Callable from main, any renderer, and any other utility process
+xpcUtilityProcess.handle('worker/add', async ({ params }) => params.a + params.b);
+
+xpcUtilityProcess.subscribe('app/theme', ({ params }) => {
+  console.log('[worker] theme:', params.dark);
+});
+
+// utility → anywhere
+const answer = await xpcUtilityProcess.send('renderer/ask', { q: 'ready?' });
+```
+
+The utility process joins XPC by **importing the module** — the import installs a `process.parentPort`
+listener that waits for the port `createUtilityProcess()` sends. There is no function to call.
+`handle()` and `subscribe()` may therefore run at module top level, before the port arrives; they are
+queued and replayed. `send()` and `broadcast()` may not — see [Error Semantics](#error-semantics).
 
 ---
 
@@ -289,6 +361,32 @@ app.whenReady().then(() => {
   worker.child.stderr?.on('data', (data) => console.error('[worker]', data.toString()));
 });
 ```
+
+> **Use `createUtilityProcess()`, not Electron's `utilityProcess.fork()`.** A natively forked child
+> is a valid utility process but is *not* an XPC peer: `send()` to its handlers resolves `null`, and
+> it receives no broadcasts. The reason is structural — the main side of the channel can only be
+> claimed by whoever holds the `child` handle, and Electron emits no "utility process created" event
+> for the library to hook (it has `child-process-gone`, but no counterpart for creation). So joining
+> the process to XPC has to happen at the moment it is created, which is what this function is.
+
+#### Options
+
+`UtilityProcessOptions` extends Electron's [`ForkOptions`](https://www.electronjs.org/docs/latest/api/utility-process#utilityprocessforkmodulepath-args-options)
+— everything Electron accepts is accepted here and forwarded unchanged.
+
+| Option | Type | Notes |
+|---|---|---|
+| `modulePath` | `string` | **Required.** Script the utility process runs |
+| `args` | `string[]` | Passed to the child as `process.argv` |
+| `stdio` | `'pipe' \| 'ignore' \| 'inherit' \| Array` | **Defaults to `'pipe'`** so `child.stdout` / `child.stderr` are readable. Pass your own to override — `'inherit'` sends output straight to the terminal but leaves `child.stdout` `null` |
+| `env`, `execArgv`, `cwd`, `serviceName`, `session`, `partition`, … | see Electron docs | Forwarded verbatim |
+
+`serviceName` is worth setting: it is the name that appears in Activity Monitor / Task Manager and in
+`app.getAppMetrics()`.
+
+Returns `{ child, kill }`. Prefer the returned `kill()` over `child.kill()` — it unregisters the
+process's routes *before* closing the port, so calls in flight toward it settle immediately instead
+of waiting for the `exit` event.
 
 ---
 
@@ -363,6 +461,58 @@ xpcRenderer.handle('renderer/hello', async (payload) => {
 });
 ```
 
+`send()` from a utility process reaches **any** layer — main, renderer, another utility process, or a
+handler the utility process registered itself. The reply is matched by the task id the utility
+process minted, so concurrent calls do not cross.
+
+---
+
+### Step 5: Broadcast & Subscribe from a Utility Process
+
+```ts
+// src/utility/worker.ts
+import { xpcUtilityProcess } from 'electron-xpc/utilityProcess';
+
+// Reaches main + all renderers + all OTHER utility processes. Never the sender.
+xpcUtilityProcess.broadcast('worker/progress', { done: 42, total: 100 });
+
+xpcUtilityProcess.subscribe('app/shutdown', (payload) => {
+  console.log('[worker] shutting down:', payload.params);
+});
+```
+
+See [Broadcast & Subscribe → Receivers Table](#receivers-table) for who receives what.
+
+---
+
+### Lifecycle
+
+When a utility process exits — cleanly, by `kill()`, or by crashing — `xpcCenter` drops everything
+that belonged to it:
+
+| On exit | Effect |
+|---|---|
+| Handlers it registered | Removed from the registry. A later `send()` to one of those names takes the "no owner" path and resolves `null` |
+| Subscriptions it held | Removed. Later broadcasts skip it |
+| `send()` calls in flight toward it | Settled with `null` immediately, instead of waiting for a reply that will never arrive |
+| Other utility processes | Untouched — cleanup is scoped to the exiting process's port |
+
+Cleanup is idempotent, so `kill()` followed by the `'exit'` event is safe.
+
+---
+
+### Error Semantics
+
+Every routing outcome resolves rather than throws. `send()` returns `null` when the handleName has
+no owner, when the owner has exited, or when the remote handler itself throws — callers never need a
+`try/catch` around a routing failure.
+
+The one exception is calling `xpcUtilityProcess.send()` or `.broadcast()` **before the MessagePort
+arrives**, which throws `MessagePort not initialized`. `handle()` and `subscribe()` do not have this
+problem: they queue and replay once the port is ready. So a utility process whose first action is a
+`broadcast()` — no handler, no subscription — must retry until the call stops throwing. There is
+currently no readiness signal to await.
+
 ---
 
 ### Communication Flow (with Utility Process)
@@ -418,6 +568,31 @@ Main Process (xpcMain)
     |                              |     id=0: call local handler directly
     |                              |     else: forward to renderer, block until done
 ```
+
+---
+
+## Changes in 1.2.0
+
+The utility process became a full XPC peer: it can `send()` to main, renderers, other utility
+processes and itself; main and renderers can `send()` to it; and all three sender kinds take part in
+`broadcast()` / `subscribe()`. Routes and in-flight calls are cleaned up when a utility process exits.
+
+`UtilityProcessOptions` now extends Electron's `ForkOptions`, so `cwd`, `session`, `partition` and
+the rest are forwarded instead of silently dropped, and the previously hard-coded `stdio: 'pipe'` is
+a default you can override.
+
+**Internal signature change.** `xpcCenter.registerPortHandler(handleName, port2)` is now
+`registerPortHandler(handleName, portId)`, and `xpcCenter.registerPort(port)` is new. `xpcCenter` is
+exported from `electron-xpc/main`, so this is recorded here even though both methods are internal by
+intent — no documented consumer API changed.
+
+---
+
+## Contributing
+
+`yarn test:app` builds the package and launches a manual Electron harness in `test/` that exercises
+the twelve cross-process cases (utility egress, ingress, broadcast self-exclusion, and lifecycle) with
+one clickable button each.
 
 ## License
 

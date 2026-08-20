@@ -1,6 +1,6 @@
 # Feature — utility process as a full XPC peer
 
-状态：开发中 · Requested 2026-08-19 · Target version `1.2.0`
+状态：已交付（R1–R6 全部有运行时证据，2026-08-20） · Requested 2026-08-19 · Target version `1.2.0`
 
 ## Intent
 

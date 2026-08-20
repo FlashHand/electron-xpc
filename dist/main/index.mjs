@@ -86,22 +86,10 @@ var XpcMain = class {
 };
 var xpcMain = new XpcMain();
 function createUtilityProcess(options) {
-  const { modulePath, args, env, execArgv, serviceName } = options;
+  const { modulePath, args, ...forkOptions } = options;
   const { port1, port2 } = new MessageChannelMain();
   const portId = xpcCenter.registerPort(port2);
-  const forkOptions = {
-    stdio: "pipe"
-  };
-  if (env !== void 0) {
-    forkOptions.env = env;
-  }
-  if (execArgv !== void 0) {
-    forkOptions.execArgv = execArgv;
-  }
-  if (serviceName !== void 0) {
-    forkOptions.serviceName = serviceName;
-  }
-  const child = utilityProcess.fork(modulePath, args, forkOptions);
+  const child = utilityProcess.fork(modulePath, args, { stdio: "pipe", ...forkOptions });
   child.postMessage({ type: "xpc:init" }, [port1]);
   port2.on("message", async (event) => {
     const message = event.data;

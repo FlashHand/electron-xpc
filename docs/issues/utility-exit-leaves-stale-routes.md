@@ -1,6 +1,6 @@
 # Issue — a dead utility process leaves stale routes and hangs its callers
 
-状态：待处理 · Severity P1 · Found 2026-08-19 · Affects `1.1.0`
+状态：已修复（xpc-004，2026-08-20，T11 验证） · Severity P1 · Found 2026-08-19 · Affects `1.1.0` · Fixed in `1.2.0`
 
 ## Symptom
 

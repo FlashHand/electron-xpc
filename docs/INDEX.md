@@ -14,15 +14,16 @@ Type-safe, async/await cross-process communication for Electron across four proc
 
 | Doc | Status |
 |---|---|
-| [features/utility-xpc-full-duplex.md](features/utility-xpc-full-duplex.md) | in delivery |
+| [features/utility-xpc-full-duplex.md](features/utility-xpc-full-duplex.md) | delivered in `1.2.0` |
 
 ## Issues
 
 | Doc | Status |
 |---|---|
-| [issues/utility-send-never-resolves.md](issues/utility-send-never-resolves.md) | 待处理 |
-| [issues/utility-subscribe-hijacks-handler-registry.md](issues/utility-subscribe-hijacks-handler-registry.md) | 待处理 |
-| [issues/utility-exit-leaves-stale-routes.md](issues/utility-exit-leaves-stale-routes.md) | 待处理 |
+| [issues/utility-send-never-resolves.md](issues/utility-send-never-resolves.md) | 已修复 — xpc-003, `1.2.0` |
+| [issues/utility-subscribe-hijacks-handler-registry.md](issues/utility-subscribe-hijacks-handler-registry.md) | 已修复 — xpc-002, `1.2.0` |
+| [issues/utility-exit-leaves-stale-routes.md](issues/utility-exit-leaves-stale-routes.md) | 已修复 — xpc-004, `1.2.0` |
+| [issues/create-utility-process-drops-fork-options.md](issues/create-utility-process-drops-fork-options.md) | 已修复 — `1.2.0` |
 
 ## Delivery
 

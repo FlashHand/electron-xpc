@@ -62,12 +62,18 @@ class XpcMain {
 
 export const xpcMain = new XpcMain();
 
-export interface UtilityProcessOptions {
+/**
+ * Everything Electron's `utilityProcess.fork()` accepts, plus the module to run.
+ *
+ * Extends `Electron.ForkOptions` rather than restating its fields: a hand-written
+ * subset silently drops whatever it forgot, and had already lost `cwd`, `session`
+ * and `partition`. Inheriting keeps this in step with Electron with no code change.
+ *
+ * `stdio` defaults to `'pipe'` — see createUtilityProcess() — but is overridable.
+ */
+export interface UtilityProcessOptions extends Electron.ForkOptions {
   modulePath: string;
   args?: string[];
-  env?: Record<string, string>;
-  execArgv?: string[];
-  serviceName?: string;
 }
 
 export interface XpcUtilityProcess {
@@ -105,7 +111,7 @@ export interface XpcUtilityProcess {
  * ```
  */
 export function createUtilityProcess(options: UtilityProcessOptions): XpcUtilityProcess {
-  const { modulePath, args, env, execArgv, serviceName } = options;
+  const { modulePath, args, ...forkOptions } = options;
 
   const { port1, port2 } = new MessageChannelMain();
 
@@ -115,21 +121,10 @@ export function createUtilityProcess(options: UtilityProcessOptions): XpcUtility
   // and a process that registers none still has an identity to broadcast with.
   const portId = xpcCenter.registerPort(port2);
 
-  const forkOptions: any = {
-    stdio: 'pipe',
-  };
-  
-  if (env !== undefined) {
-    forkOptions.env = env;
-  }
-  if (execArgv !== undefined) {
-    forkOptions.execArgv = execArgv;
-  }
-  if (serviceName !== undefined) {
-    forkOptions.serviceName = serviceName;
-  }
-  
-  const child = utilityProcess.fork(modulePath, args, forkOptions);
+  // stdio ahead of the spread: 'pipe' is the default (a utility process's output
+  // would otherwise vanish, and the README's stdout/stderr example relies on it),
+  // but an explicit stdio from the caller wins.
+  const child = utilityProcess.fork(modulePath, args, { stdio: 'pipe', ...forkOptions });
 
   child.postMessage({ type: 'xpc:init' }, [port1]);
 

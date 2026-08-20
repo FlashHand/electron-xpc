@@ -1,6 +1,6 @@
 # Issue — utility port identity is derived from handler registration
 
-状态：待处理 · Severity P1 · Found 2026-08-19 · Affects `1.1.0`
+状态：已修复（xpc-002，2026-08-20，T3/T7–T9/T11 验证） · Severity P1 · Found 2026-08-19 · Affects `1.1.0` · Fixed in `1.2.0`
 
 One root cause, three observable defects.
 
