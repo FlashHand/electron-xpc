@@ -319,6 +319,11 @@ var XpcCenter = class {
    */
   registerMainSubscriber(handleName, callback) {
     this.addSubscriber(handleName, { type: "main", id: 0 });
+    if (this.mainSubscriberCallbacks.has(handleName)) {
+      console.warn(
+        `[xpcCenter] main subscriber for "${handleName}" overwritten \u2014 the previous callback will never run again. subscribe() keeps ONE callback per channel; use a relay if several consumers need this channel.`
+      );
+    }
     this.mainSubscriberCallbacks.set(handleName, callback);
   }
   /**

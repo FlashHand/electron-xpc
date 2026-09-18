@@ -105,6 +105,16 @@ class XpcUtilityProcess implements XpcUtilityProcessApi {
   }
 
   private registerSubscriber(handleName: string, callback: (payload: XpcPayload) => void): void {
+  // Overwrite is the intended semantics — it is what keeps a re-subscribing consumer from
+  // accumulating listeners, which matters because there is deliberately no unsubscribe().
+  // But it is silent, so TWO DIFFERENT consumers on one channel means the earlier one is
+  // permanently dead with no error anywhere. Say so at the moment it happens.
+  // See docs/issues/duplicate-subscribe-is-silent.md
+    if (this.subscriberCallbacks.has(handleName)) {
+      console.warn(
+        `[xpcUtilityProcess] subscriber for "${handleName}" overwritten — the previous callback will never run again. subscribe() keeps ONE callback per channel; use a relay if several consumers need this channel.`
+      );
+    }
     this.subscriberCallbacks.set(handleName, callback);
     this.port?.postMessage({
       type: XPC_SUBSCRIBE,

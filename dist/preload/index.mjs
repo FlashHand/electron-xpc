@@ -58,6 +58,11 @@ var send = async (handleName, params) => {
   return await ipcRenderer.invoke(XPC_EXEC, payload);
 };
 var subscribe = (handleName, callback) => {
+  if (xpcSubscribers.has(handleName)) {
+    console.warn(
+      `[xpcPreload] subscriber for "${handleName}" overwritten \u2014 the previous callback will never run again. subscribe() keeps ONE callback per channel; use a relay if several consumers need this channel.`
+    );
+  }
   xpcSubscribers.set(handleName, callback);
   ipcRenderer.send(XPC_SUBSCRIBE, { handleName });
   if (!broadcastDispatchListenerSetup) {

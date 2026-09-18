@@ -87,6 +87,16 @@ const send = async (handleName: string, params?: any): Promise<any> => {
  * the callback will be invoked with the full XpcPayload.
  */
 const subscribe = (handleName: string, callback: (payload: XpcPayload) => void): void => {
+  // Overwrite is the intended semantics — it is what keeps a re-subscribing consumer from
+  // accumulating listeners, which matters because there is deliberately no unsubscribe().
+  // But it is silent, so TWO DIFFERENT consumers on one channel means the earlier one is
+  // permanently dead with no error anywhere. Say so at the moment it happens.
+  // See docs/issues/duplicate-subscribe-is-silent.md
+  if (xpcSubscribers.has(handleName)) {
+    console.warn(
+      `[xpcPreload] subscriber for "${handleName}" overwritten — the previous callback will never run again. subscribe() keeps ONE callback per channel; use a relay if several consumers need this channel.`
+    );
+  }
   xpcSubscribers.set(handleName, callback);
 
   // Notify main process about this subscription

@@ -85,6 +85,11 @@ var XpcUtilityProcess = class {
     this.registerSubscriber(handleName, callback);
   }
   registerSubscriber(handleName, callback) {
+    if (this.subscriberCallbacks.has(handleName)) {
+      console.warn(
+        `[xpcUtilityProcess] subscriber for "${handleName}" overwritten \u2014 the previous callback will never run again. subscribe() keeps ONE callback per channel; use a relay if several consumers need this channel.`
+      );
+    }
     this.subscriberCallbacks.set(handleName, callback);
     this.port?.postMessage({
       type: XPC_SUBSCRIBE,

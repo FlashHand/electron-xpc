@@ -249,6 +249,16 @@ class XpcCenter {
    */
   registerMainSubscriber(handleName: string, callback: (payload: XpcPayload) => void): void {
     this.addSubscriber(handleName, { type: 'main', id: 0 });
+  // Overwrite is the intended semantics — it is what keeps a re-subscribing consumer from
+  // accumulating listeners, which matters because there is deliberately no unsubscribe().
+  // But it is silent, so TWO DIFFERENT consumers on one channel means the earlier one is
+  // permanently dead with no error anywhere. Say so at the moment it happens.
+  // See docs/issues/duplicate-subscribe-is-silent.md
+    if (this.mainSubscriberCallbacks.has(handleName)) {
+      console.warn(
+        `[xpcCenter] main subscriber for "${handleName}" overwritten — the previous callback will never run again. subscribe() keeps ONE callback per channel; use a relay if several consumers need this channel.`
+      );
+    }
     this.mainSubscriberCallbacks.set(handleName, callback);
   }
 

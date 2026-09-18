@@ -1,6 +1,6 @@
 {
   "name": "electron-xpc",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "version_code": "260820163550",
   "description": "Type-safe cross-process communication for Electron (main ↔ preload ↔ renderer ↔ utility process)",
   "exports": {
