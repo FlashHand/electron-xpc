@@ -1,7 +1,7 @@
 const path = require('path');
 const { app, BrowserWindow } = require('electron');
 // A real consumer writes: require('electron-xpc/main')
-const { xpcCenter, xpcMain, createUtilityProcess } = require('../dist/main/index.js');
+const { xpcCenter, xpcMain, createUtilityProcess, getXpcCaller, isMainFrameCaller } = require('../dist/main/index.js');
 
 /** --auto runs the whole matrix headlessly, prints a table, and exits. */
 const AUTO = process.argv.includes('--auto');
@@ -78,6 +78,17 @@ xpcMain.handle('harness/killB', async () => {
   utilB = null;
   return { killed: true };
 });
+
+/** T13: a main handler sees its caller — this window's main frame directly, main when called through xpcMain.send(). */
+xpcMain.handle('harness/whoCalled', async () => {
+  const caller = getXpcCaller();
+  return {
+    type: caller ? caller.type : null,
+    mainFrame: win ? isMainFrameCaller(caller, win.webContents) : false,
+    url: caller && caller.type === 'renderer' ? caller.url : null,
+  };
+});
+xpcMain.handle('harness/whoCalledFromMain', async () => xpcMain.send('harness/whoCalled'));
 
 /** T12: fork a utility process that owns no handlers and only broadcasts. */
 xpcMain.handle('harness/forkC', async () => {

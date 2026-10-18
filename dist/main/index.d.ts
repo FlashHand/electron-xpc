@@ -1,4 +1,4 @@
-import { MessagePortMain } from 'electron';
+import { WebContents, WebFrameMain, MessagePortMain } from 'electron';
 
 type XpcPayload = {
     /** Unique task ID, guaranteed unique within process lifetime */
@@ -10,6 +10,48 @@ type XpcPayload = {
     /** Return data from target process, nullable, defaults to null */
     ret?: any;
 };
+
+/**
+ * Who called the main-process handler that is running now. This is only the most recent hop: a renderer
+ * that calls main handler A, which calls handler B through xpcMain.send(), makes B see `main`.
+ * - `renderer`: from the invoke event. `processId`, `frameId`, `origin` and `url` are copied when the call
+ *   arrives and identify the calling document. `frame` is Electron's live WebFrameMain: it follows the frame
+ *   to whatever document it shows later (and is null if the frame was already gone), so use it to talk to the
+ *   frame, not to identify the caller.
+ * - `main`: `xpcMain.send()` from the main process
+ * - `utility`: a utility process's `send()`. `portId` is an opaque id, stable for that process's lifetime
+ */
+type XpcCaller = {
+    type: 'renderer';
+    webContents: WebContents;
+    frame: WebFrameMain | null;
+    processId: number;
+    frameId: number;
+    origin: string;
+    url: string;
+} | {
+    type: 'main';
+} | {
+    type: 'utility';
+    portId: string;
+};
+/**
+ * The caller of the main-process handler this code runs inside, or `undefined` outside a handler call.
+ * Works synchronously and after awaits within the same call. Code the handler calls directly (a method call,
+ * `xpcMain.getHandler(name)(payload)`, a main subscriber fired by `xpcMain.broadcast()`) sees the same caller,
+ * and timers or loops started inside a handler keep seeing it after the handler returns — so read it at handler
+ * entry and pass it on explicitly.
+ */
+declare const getXpcCaller: () => XpcCaller | undefined;
+/**
+ * True only when the call was sent by the frame that is now the main frame of `webContents`: the ids recorded
+ * when the call arrived are compared with `webContents.mainFrame`, so a call from a document the frame has
+ * since navigated away from (to another process) is refused. A same-site navigation can keep the frame, so it
+ * does not tell those documents apart: pin `caller.url` (or `caller.origin`) when the page may navigate, and
+ * note that a same-origin iframe or popup can send through the main frame's preload API. Never throws; anything
+ * unreadable is `false`.
+ */
+declare const isMainFrameCaller: (caller: XpcCaller | undefined, webContents: WebContents | null | undefined) => boolean;
 
 interface SubscriberEntry {
     type: 'main' | 'renderer' | 'port';
@@ -80,9 +122,15 @@ declare class XpcCenter {
     /**
      * Execute a handleName: if main-process handler, call directly;
      * otherwise forward to target renderer or utility process, block until __xpc_finish__.
-     * Used by both ipcMain.handle(XPC_EXEC) and xpcMain.send().
+     * Used by xpcMain.send(); a main-process handler it reaches sees the caller `main`.
      */
     exec(handleName: string, params?: any): Promise<any>;
+    /**
+     * exec() on behalf of `caller`, which a main-process handler sees through getXpcCaller().
+     * Internal: used by ipcMain.handle(XPC_EXEC) and a utility process's send(). `caller` is required so a new
+     * entry point cannot silently default to `main`.
+     */
+    execAs(caller: XpcCaller, handleName: string, params?: any): Promise<any>;
     /**
      * Find the portId for a given MessagePortMain instance.
      * Returns undefined if the port was never registered via registerPort().
@@ -303,4 +351,4 @@ declare const createXpcMainEmitter: <T>(className: string) => XpcEmitterOf<T>;
  */
 declare const xpcIgnore: (target: any, propertyKey: string) => void;
 
-export { type SubscriberEntry, type UtilityProcessOptions, type XpcEmitterOf, XpcMainHandler, type XpcPayload, XpcTask, type XpcUtilityProcess, createUtilityProcess, createXpcMainEmitter, xpcCenter, xpcIgnore, xpcMain };
+export { type SubscriberEntry, type UtilityProcessOptions, type XpcCaller, type XpcEmitterOf, XpcMainHandler, type XpcPayload, XpcTask, type XpcUtilityProcess, createUtilityProcess, createXpcMainEmitter, getXpcCaller, isMainFrameCaller, xpcCenter, xpcIgnore, xpcMain };

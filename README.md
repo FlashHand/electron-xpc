@@ -209,6 +209,41 @@ await notifyEmitter.showToast({ text: 'Hello!' });
 
 ---
 
+## Who Called? (main-process handlers)
+
+Since `1.3.0`, a main-process handler can ask who called it — without changing its signature. `getXpcCaller()` works synchronously and after any `await` inside the same call, and returns `undefined` outside a handler call. Each call has its own context (`AsyncLocalStorage`), so concurrent calls never see each other.
+
+```ts
+import { XpcMainHandler, getXpcCaller, isMainFrameCaller } from 'electron-xpc/main';
+
+class SettingsTable extends XpcMainHandler {
+  async approve(params: { name: string }): Promise<boolean> {
+    // Accept this call only from the main frame of the settings window.
+    if (!isMainFrameCaller(getXpcCaller(), settingsWindow.webContents)) return false;
+    // ...
+    return true;
+  }
+}
+```
+
+| Caller | `getXpcCaller()` |
+|---|---|
+| A renderer (`xpcRenderer.send`, emitters) | `{ type: 'renderer', webContents, frame, processId, frameId, origin, url }` — from the invoke event. `processId`, `frameId`, `origin` and `url` are recorded when the call arrives and identify the calling document; `frame` is Electron's live `WebFrameMain` (`null` if the frame was already gone), which follows the frame to later documents — use it to talk to the frame, not to identify the caller |
+| The main process (`xpcMain.send`, main emitters) | `{ type: 'main' }` |
+| A utility process (`xpcUtilityProcess.send`) | `{ type: 'utility', portId }` — an opaque id, stable for that process's lifetime |
+
+`isMainFrameCaller(caller, webContents)` is true only when the call was sent by the frame that is now the main frame of that `WebContents`: the recorded `processId` + `frameId` are compared with `webContents.mainFrame`, so a call from a document the frame has since left for another process is refused. It never throws; a destroyed or missing `WebContents` or frame is `false`.
+
+What it cannot tell you:
+
+- **Which document of the same site.** A same-site navigation can keep the frame, so pin `caller.url` (or `caller.origin`), or block navigation with `will-navigate`, when the page may navigate. Pages loaded with `loadFile` all share the `file://` origin: compare the url's path, since a hash route only changes the fragment.
+- **Which script.** A same-origin iframe or popup can reach the main frame's preload API (`top.xpcRenderer`, `opener.xpcRenderer`), and its call is then sent by the main frame.
+- **Whether main answered.** A renderer can register a handler name that main owns and answer in its place; the main handler and its check then never run (known issue, to be refused in a later version).
+- **Who is upstream.** The caller is only the most recent hop: a renderer → main handler A → `xpcMain.send()` → handler B makes B see `main`, and renderer → utility handler → main handler shows `utility`.
+- **Where the call ends.** Code the handler calls directly (a method call, `xpcMain.getHandler(name)(payload)`, a main subscriber fired by `xpcMain.broadcast()`) sees the handler's caller, and timers or loops started inside a handler keep seeing it after it returns. Read `getXpcCaller()` at handler entry and pass it on explicitly.
+
+The library reports who called; deciding what that caller may do stays with your app. Renderer and utility-process handlers do not get a caller.
+
 ## Broadcast & Subscribe
 
 Fire-and-forget one-to-many notifications for event-driven communication.
@@ -571,6 +606,18 @@ Main Process (xpcMain)
 
 ---
 
+## Changes in 1.3.0
+
+Main-process handlers can read their caller with `getXpcCaller()`, and `isMainFrameCaller()` checks a
+call against a `WebContents`' main frame (see *Who Called?*). New exports from `electron-xpc/main`:
+`getXpcCaller`, `isMainFrameCaller` and the type `XpcCaller`. Handler signatures, emitter types and the
+wire protocol are unchanged, so existing apps upgrade without code changes.
+
+**Internal addition.** `xpcCenter.execAs(caller, handleName, params)` is new; the IPC entry and utility
+ports use it. `xpcCenter.exec(handleName, params)` keeps its 1.2.0 signature and runs as `main`.
+
+---
+
 ## Changes in 1.2.0
 
 The utility process became a full XPC peer: it can `send()` to main, renderers, other utility
@@ -590,9 +637,10 @@ intent — no documented consumer API changed.
 
 ## Contributing
 
-`yarn test:app` builds the package and launches a manual Electron harness in `test/` that exercises
-the twelve cross-process cases (utility egress, ingress, broadcast self-exclusion, and lifecycle) with
-one clickable button each.
+`yarn test:app` builds the package and launches a manual Electron harness in `test/` with one clickable
+button per case: twelve cross-process cases (utility egress, ingress, broadcast self-exclusion, and
+lifecycle) and T13, the caller context. `yarn test:unit` runs the caller-context tests with plain Node
+against `dist/` (Electron stubbed, no window).
 
 ## License
 

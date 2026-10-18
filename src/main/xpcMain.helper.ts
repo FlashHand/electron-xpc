@@ -140,11 +140,11 @@ export function createUtilityProcess(options: UtilityProcessOptions): XpcUtility
 
     if (type === XPC_EXEC && payload) {
       // Utility process is invoking a handler owned by main, a renderer, another
-      // utility process, or itself. xpcCenter.exec() resolves the owner, and
+      // utility process, or itself. xpcCenter.execAs() resolves the owner, and
       // returns null for an unregistered handleName instead of blocking.
-      const ret = await xpcCenter.exec(payload.handleName, payload.params);
+      const ret = await xpcCenter.execAs({ type: 'utility', portId }, payload.handleName, payload.params);
       // The reply MUST carry payload.id — the id minted inside the utility
-      // process. exec() mints a different id for its own downstream leg; using
+      // process. execAs() mints a different id for its own downstream leg; using
       // that one would never match the utility's pending task and the caller's
       // send() would stay parked forever.
       port2.postMessage({

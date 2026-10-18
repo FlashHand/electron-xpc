@@ -2,6 +2,13 @@
 
 Non-blocking findings and deferred proposals. Nothing here blocks the current sprint.
 
+## Findings
+
+### F1 — a renderer can take over a main-owned handler name
+
+Found in [xpc-007-2](reviews/xpc-007-2.md); pre-existing. Recommendation and options in
+[../issues/renderer-register-overrides-main-handler.md](../issues/renderer-register-overrides-main-handler.md).
+
 ## Proposals
 
 ### B1 — `XpcUtilityProcessHandler` + `createXpcUtilityProcessEmitter`

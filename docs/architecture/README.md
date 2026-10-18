@@ -101,11 +101,11 @@ breaking wire change for no behavioral gain:
 
 ## Routing: `send()`
 
-`xpcCenter.exec(handleName, params)` is the single routing decision point for every `send()` from
-every layer.
+`xpcCenter.execAs(caller, handleName, params)` is the single routing decision point for every `send()` from
+every layer; `xpcCenter.exec(handleName, params)` is `execAs` with the caller `main` (see *Caller context*).
 
 ```text
-exec(handleName, params)
+execAs(caller, handleName, params)
    │
    ├─ registry has no entry ──────────────────────────► resolve null
    │
@@ -128,7 +128,7 @@ sender path is the one that must reach `exec`:
 utility.send(name)                main process                     owner of `name`
     │                                  │                                 │
     │  port __xpc_exec__ ──────────────►                                  │
-    │  [park on local semaphore]        │ xpcCenter.exec(name, params)    │
+    │  [park on local semaphore]        │ xpcCenter.execAs(…, name, …)    │
     │                                   ├─ main / renderer / port ───────►│
     │                                   │◄──────────── result ────────────┤
     │  ◄── port __xpc_finish__ ─────────┤ (replies with the utility's
@@ -191,11 +191,29 @@ self-exclusion and broadcast. See
 | `handle()` on an already-owned name | ownership transfers to the new claimant (logged) |
 | Renderer destroyed | *not currently cleaned up* — see [plan/backlog.md](../plan/backlog.md) |
 
+## Caller context (main-process handlers)
+
+Since `1.3.0` ([feature](../features/caller-context.md)). `xpcCenter.execAs(caller, handleName, params)` runs a
+**main-process** handler inside an `AsyncLocalStorage` context holding its caller; `getXpcCaller()` reads it.
+`caller` is a required argument, so a new entry point cannot silently default to the most trusted value.
+
+| Entry | Caller |
+|---|---|
+| `ipcMain.handle(__xpc_exec__)` (renderer `send`) | `createRendererCaller(event)`: `{ type: 'renderer', webContents: event.sender, frame: event.senderFrame ?? null, processId: event.processId, frameId: event.frameId, origin, url }` — ids, origin and url copied on arrival |
+| `xpcMain.send()` → `xpcCenter.exec()` | `{ type: 'main' }` |
+| a utility process's `__xpc_exec__` on its port | `{ type: 'utility', portId }` (the fork-time id) |
+
+`isMainFrameCaller` compares the recorded `processId` + `frameId` with `webContents.mainFrame` and never reads the
+live `frame`: Electron keeps one `WebFrameMain` per frame and moves it to the new document on a cross-origin
+navigation, and throws on access once the render frame is disposed.
+
+Calls forwarded to a renderer or utility handler carry no caller: the wire protocol is unchanged.
+
 ## Public API surface
 
 | Entry point | Exports |
 |---|---|
-| `electron-xpc/main` | `xpcCenter`, `xpcMain`, `createUtilityProcess`, `XpcTask`, `XpcMainHandler`, `createXpcMainEmitter`, `xpcIgnore`, types |
+| `electron-xpc/main` | `xpcCenter`, `xpcMain`, `createUtilityProcess`, `XpcTask`, `XpcMainHandler`, `getXpcCaller`, `isMainFrameCaller`, `createXpcMainEmitter`, `xpcIgnore`, types (incl. `XpcCaller`) |
 | `electron-xpc/preload` | `xpcRenderer` (auto-exposed to `window`), `xpcHandlers`, `XpcPreloadHandler`, `createXpcPreloadEmitter`, `xpcIgnore`, types |
 | `electron-xpc/renderer` | `xpcRenderer` (bridge reference), `XpcRendererHandler`, `createXpcRendererEmitter`, `xpcIgnore`, types |
 | `electron-xpc/utilityProcess` | `xpcUtilityProcess`, types |
@@ -213,6 +231,7 @@ self-exclusion and broadcast. See
 | D5 | Wire constants duplicated per layer, not shared | Prevents preload/renderer bundles from importing main-process modules |
 | D6 | portId minted at fork, not at first handler registration | Identity must exist before the utility registers anything, otherwise broadcast-only utilities have no identity |
 | D7 | Handler/emitter classes exist for main/preload/renderer but **not** utility | Deferred, not rejected — see [plan/backlog.md](../plan/backlog.md) |
+| D8 | Caller context via `AsyncLocalStorage`, read with `getXpcCaller()` — not an extra handler parameter | Keeps D4 (0 or 1 parameter) and every existing emitter type unchanged; a per-call store cannot leak between concurrent calls the way a "current caller" variable would |
 
 ## Invariants
 

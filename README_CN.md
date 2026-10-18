@@ -196,6 +196,41 @@ await notifyEmitter.showToast({ text: 'Hello!' });
 
 ---
 
+## 谁调用了（主进程 handler）
+
+自 `1.3.0` 起，主进程 handler 可以知道是谁调用了它，而且不用改方法签名。`getXpcCaller()` 在同一次调用里同步读、`await` 之后读都有效；不在 handler 调用里时返回 `undefined`。每次调用有自己的上下文（`AsyncLocalStorage`），并发的调用互相看不到。
+
+```ts
+import { XpcMainHandler, getXpcCaller, isMainFrameCaller } from 'electron-xpc/main';
+
+class SettingsTable extends XpcMainHandler {
+  async approve(params: { name: string }): Promise<boolean> {
+    // 只接受来自设置窗口主框架的调用。
+    if (!isMainFrameCaller(getXpcCaller(), settingsWindow.webContents)) return false;
+    // ...
+    return true;
+  }
+}
+```
+
+| 调用方 | `getXpcCaller()` |
+|---|---|
+| 渲染进程（`xpcRenderer.send`、emitter） | `{ type: 'renderer', webContents, frame, processId, frameId, origin, url }` —— 取自 invoke 事件。`processId`、`frameId`、`origin`、`url` 在调用到达时记下，标识发出调用的那个文档；`frame` 是 Electron 的活对象 `WebFrameMain`（到达时帧已不在则为 `null`），帧换了文档它也跟着换 —— 用它和帧通信，不要用它判断调用方 |
+| 主进程（`xpcMain.send`、main emitter） | `{ type: 'main' }` |
+| 工具进程（`xpcUtilityProcess.send`） | `{ type: 'utility', portId }` —— 不透明的 id，在该进程存活期间不变 |
+
+`isMainFrameCaller(caller, webContents)` 只在发出调用的帧此刻仍是该 `WebContents` 的主框架时为真：用到达时记下的 `processId` + `frameId` 与 `webContents.mainFrame` 比较，所以帧已跨进程导航离开的旧文档发来的调用会被拒绝。它从不抛错；`WebContents` 或帧已销毁、缺失时为 `false`。
+
+它分辨不了：
+
+- **同一站点的哪个文档。** 同站导航可能沿用同一个帧；页面会导航时，请再核对 `caller.url`（或 `caller.origin`），或用 `will-navigate` 禁止导航。用 `loadFile` 加载的页面 origin 都是 `file://`，要比较 url 的路径 —— hash 路由只改片段。
+- **哪段脚本。** 同源的 iframe 或弹出窗口能拿到主框架的 preload API（`top.xpcRenderer`、`opener.xpcRenderer`），这样发出的调用算主框架发的。
+- **是否真由主进程作答。** 渲染进程可以注册一个主进程已拥有的 handler 名并代为作答，此时主进程 handler 及其中的检查都不会运行（已知问题，后续版本将拒绝这类注册）。
+- **更上游是谁。** 调用方只是最近一跳：渲染进程 → 主进程 handler A → `xpcMain.send()` → handler B，B 看到的是 `main`；渲染进程 → 工具进程 handler → 主进程 handler，看到的是 `utility`。
+- **调用到哪里为止。** handler 直接调用的代码（方法调用、`xpcMain.getHandler(name)(payload)`、handler 里 `xpcMain.broadcast()` 触发的主进程订阅回调）看到的是 handler 的调用方；handler 里启动的定时器或循环在 handler 返回后也仍能读到它。请在 handler 入口读 `getXpcCaller()`，再显式传下去。
+
+库只报告是谁调用；这个调用方能做什么，由应用自己决定。渲染进程与工具进程里的 handler 拿不到调用方。
+
 ## 广播与订阅
 
 即发即忘（fire-and-forget）的一对多通知，用于事件驱动的通信。
@@ -548,6 +583,17 @@ Preload A / Web A               主进程                  Preload B / Web B
 
 ---
 
+## 1.3.0 变更
+
+主进程 handler 可以用 `getXpcCaller()` 读到调用方，`isMainFrameCaller()` 用来核对调用是否来自某个
+`WebContents` 的主框架（见“谁调用了”一节）。`electron-xpc/main` 新增导出：`getXpcCaller`、
+`isMainFrameCaller` 与类型 `XpcCaller`。handler 签名、emitter 类型与线上协议都没有变，已有应用升级无需改代码。
+
+**内部新增。** 新增 `xpcCenter.execAs(caller, handleName, params)`，IPC 入口与工具进程端口使用它；
+`xpcCenter.exec(handleName, params)` 保持 1.2.0 的签名，以 `main` 身份执行。
+
+---
+
 ## 1.2.0 变更
 
 工具进程升级为完整的 XPC 对等端：它可以 `send()` 给主进程、渲染进程、其他工具进程以及它自己；
@@ -566,8 +612,9 @@ Preload A / Web A               主进程                  Preload B / Web B
 
 ## 参与开发
 
-`yarn test:app` 会构建本包并启动 `test/` 下的手工 Electron 测试台，用十二个可点击按钮分别覆盖
-十二种跨进程用例（工具进程出向、入向、广播自排除、生命周期）。
+`yarn test:app` 会构建本包并启动 `test/` 下的手工 Electron 测试台，每个用例一个可点击按钮：
+十二种跨进程用例（工具进程出向、入向、广播自排除、生命周期），以及 T13 调用方上下文。
+`yarn test:unit` 用普通 Node 针对 `dist/` 运行调用方上下文测试（Electron 用桩替代，不开窗口）。
 
 ## 许可证
 

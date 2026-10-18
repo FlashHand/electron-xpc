@@ -1,7 +1,7 @@
 {
   "name": "electron-xpc",
-  "version": "1.2.1",
-  "version_code": "260820163550",
+  "version": "1.3.0",
+  "version_code": "261018214456",
   "description": "Type-safe cross-process communication for Electron (main ↔ preload ↔ renderer ↔ utility process)",
   "exports": {
     "./main": {
@@ -52,6 +52,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
+    "test:unit": "yarn build && node --test test/*.test.mjs",
     "test:app": "yarn build && electron test/main.js",
     "test:auto": "yarn build && electron test/main.js --auto",
     "prepublishOnly": "yarn build",

@@ -1,6 +1,16 @@
 # Delivery plan
 
-## Current sprint — utility process as a full XPC peer
+## Current sprint — caller context (`1.3.0`)
+
+Feature: [../features/caller-context.md](../features/caller-context.md)
+
+| Task | Scope | Requirement | depends-on | Status |
+|---|---|---|---|---|
+| [xpc-007](tasks/xpc-007.md) | main-process caller context | R1–R6 | — | in-progress — [review](reviews/xpc-007-1.md) · [re-verify](reviews/xpc-007-2.md) passed; T13 (Ral) open |
+
+Publishing `1.3.0` to npm is Ral's call. Consumers (Dozin, Cowork) upgrade after the release.
+
+## Previous sprint — utility process as a full XPC peer
 
 Feature: [../features/utility-xpc-full-duplex.md](../features/utility-xpc-full-duplex.md) ·
 Analysis: [analysis/utility-xpc.md](analysis/utility-xpc.md) · Target `1.2.0`

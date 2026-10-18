@@ -2,6 +2,7 @@
 
 var electron = require('electron');
 var semaphore = require('@rig-lib/semaphore');
+var async_hooks = require('async_hooks');
 var crypto = require('crypto');
 
 // src/main/xpcCenter.helper.ts
@@ -39,6 +40,41 @@ var prefix = Math.random().toString(36).slice(2, 8);
 var counter = 0;
 var generateXpcId = () => {
   return `${prefix}-${(++counter).toString(36)}`;
+};
+var storage = new async_hooks.AsyncLocalStorage();
+var runWithXpcCaller = (caller, run) => storage.run(caller, run);
+var readFrame = (frame, key) => {
+  if (!frame) return "";
+  try {
+    return frame[key];
+  } catch {
+    return "";
+  }
+};
+var createRendererCaller = (event) => {
+  const frame = event.senderFrame ?? null;
+  return {
+    type: "renderer",
+    webContents: event.sender,
+    frame,
+    processId: event.processId,
+    frameId: event.frameId,
+    origin: readFrame(frame, "origin"),
+    url: readFrame(frame, "url")
+  };
+};
+var getXpcCaller = () => storage.getStore();
+var isMainFrameCaller = (caller, webContents2) => {
+  if (!caller || caller.type !== "renderer" || !caller.frame || !webContents2) return false;
+  try {
+    if (webContents2.isDestroyed() || caller.webContents.isDestroyed()) return false;
+    if (caller.webContents.id !== webContents2.id) return false;
+    if (!Number.isInteger(caller.processId) || !Number.isInteger(caller.frameId)) return false;
+    const mainFrame = webContents2.mainFrame;
+    return caller.processId === mainFrame.processId && caller.frameId === mainFrame.routingId;
+  } catch {
+    return false;
+  }
 };
 var XPC_REGISTER = "__xpc_register__";
 var XPC_EXEC = "__xpc_exec__";
@@ -101,7 +137,7 @@ function createUtilityProcess(options) {
       xpcCenter.registerPortHandler(handleName, portId);
     }
     if (type === XPC_EXEC && payload) {
-      const ret = await xpcCenter.exec(payload.handleName, payload.params);
+      const ret = await xpcCenter.execAs({ type: "utility", portId }, payload.handleName, payload.params);
       port2.postMessage({
         type: XPC_FINISH,
         payload: { ...payload, ret: ret ?? null }
@@ -243,9 +279,17 @@ var XpcCenter = class {
   /**
    * Execute a handleName: if main-process handler, call directly;
    * otherwise forward to target renderer or utility process, block until __xpc_finish__.
-   * Used by both ipcMain.handle(XPC_EXEC) and xpcMain.send().
+   * Used by xpcMain.send(); a main-process handler it reaches sees the caller `main`.
    */
   async exec(handleName, params) {
+    return this.execAs({ type: "main" }, handleName, params);
+  }
+  /**
+   * exec() on behalf of `caller`, which a main-process handler sees through getXpcCaller().
+   * Internal: used by ipcMain.handle(XPC_EXEC) and a utility process's send(). `caller` is required so a new
+   * entry point cannot silently default to `main`.
+   */
+  async execAs(caller, handleName, params) {
     const entry = this.registry.get(handleName);
     if (entry == null) {
       return null;
@@ -261,7 +305,7 @@ var XpcCenter = class {
         return null;
       }
       try {
-        return await handler(payload);
+        return await runWithXpcCaller(caller, () => handler(payload));
       } catch (error) {
         console.error("[xpcCenter] error in main handler", handleName, error);
         return null;
@@ -374,8 +418,8 @@ var XpcCenter = class {
       }
       this.registry.set(payload.handleName, { type: "renderer", id: event.sender.id });
     });
-    electron.ipcMain.handle(XPC_EXEC2, async (_event, payload) => {
-      return this.exec(payload.handleName, payload.params);
+    electron.ipcMain.handle(XPC_EXEC2, async (event, payload) => {
+      return this.execAs(createRendererCaller(event), payload.handleName, payload.params);
     });
     electron.ipcMain.on(XPC_FINISH2, (_event, payload) => {
       const task = this.pendingTasks.get(payload.id);
@@ -456,6 +500,8 @@ exports.XpcMainHandler = XpcMainHandler;
 exports.XpcTask = XpcTask;
 exports.createUtilityProcess = createUtilityProcess;
 exports.createXpcMainEmitter = createXpcMainEmitter;
+exports.getXpcCaller = getXpcCaller;
+exports.isMainFrameCaller = isMainFrameCaller;
 exports.xpcCenter = xpcCenter;
 exports.xpcIgnore = xpcIgnore;
 exports.xpcMain = xpcMain;

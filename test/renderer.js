@@ -294,6 +294,21 @@ const CASES = [
       return 'a utility owning zero handlers broadcast successfully';
     },
   },
+  {
+    id: 'T13',
+    group: 'caller context (1.3.0)',
+    title: 'main handler sees its caller',
+    run: async () => {
+      const direct = await xpc.send('harness/whoCalled');
+      expectEqual(direct?.type, 'renderer', 'caller type of a renderer call');
+      expectEqual(direct?.mainFrame, true, 'isMainFrameCaller for this window');
+      expectEqual(direct?.url, location.href, 'url recorded on arrival');
+      const nested = await xpc.send('harness/whoCalledFromMain');
+      expectEqual(nested?.type, 'main', 'caller type through xpcMain.send()');
+      expectEqual(nested?.mainFrame, false, 'main is not a frame');
+      return 'renderer call → renderer + main frame; xpcMain.send() → main';
+    },
+  },
 ];
 
 // ------------------------------------------------------------------------- view

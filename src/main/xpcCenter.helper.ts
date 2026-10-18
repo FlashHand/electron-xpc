@@ -2,6 +2,7 @@ import { ipcMain, webContents, MessagePortMain } from 'electron';
 import { XpcPayload } from '../shared/xpc.type';
 import { XpcTask } from './xpcTask.helper';
 import { generateXpcId } from './xpcId.helper';
+import { createRendererCaller, runWithXpcCaller, type XpcCaller } from './xpcCaller.helper';
 import { xpcMain } from './xpcMain.helper';
 import { randomUUID } from 'crypto';
 
@@ -145,9 +146,18 @@ class XpcCenter {
   /**
    * Execute a handleName: if main-process handler, call directly;
    * otherwise forward to target renderer or utility process, block until __xpc_finish__.
-   * Used by both ipcMain.handle(XPC_EXEC) and xpcMain.send().
+   * Used by xpcMain.send(); a main-process handler it reaches sees the caller `main`.
    */
   async exec(handleName: string, params?: any): Promise<any> {
+    return this.execAs({ type: 'main' }, handleName, params);
+  }
+
+  /**
+   * exec() on behalf of `caller`, which a main-process handler sees through getXpcCaller().
+   * Internal: used by ipcMain.handle(XPC_EXEC) and a utility process's send(). `caller` is required so a new
+   * entry point cannot silently default to `main`.
+   */
+  async execAs(caller: XpcCaller, handleName: string, params?: any): Promise<any> {
     const entry = this.registry.get(handleName);
     if (entry == null) {
       return null;
@@ -166,7 +176,7 @@ class XpcCenter {
         return null;
       }
       try {
-        return await handler(payload);
+        return await runWithXpcCaller(caller, () => handler(payload));
       } catch (error) {
         console.error('[xpcCenter] error in main handler', handleName, error);
         return null;
@@ -313,8 +323,9 @@ class XpcCenter {
     });
 
     // Renderer invokes exec via IPC
-    ipcMain.handle(XPC_EXEC, async (_event, payload: XpcPayload): Promise<any> => {
-      return this.exec(payload.handleName, payload.params);
+    ipcMain.handle(XPC_EXEC, async (event, payload: XpcPayload): Promise<any> => {
+      // The invoke event is the only place the calling WebContents and frame are known; record them on arrival.
+      return this.execAs(createRendererCaller(event), payload.handleName, payload.params);
     });
 
     // Target renderer finished execution, unblock pending task
