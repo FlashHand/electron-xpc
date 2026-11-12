@@ -48,11 +48,11 @@ const handle = (handleName: string, handler: XpcHandler): void => {
         ret = null;
       }
     }
-    // Send __xpc_finish__ back to main with result
+    // Send __xpc_finish__ back to main with result. No `params`: main reads only id and ret, and echoing
+    // the request made main decode it a second time (docs/issues/finish-echoes-params.md).
     ipcRenderer.send(XPC_FINISH, {
       id: payload.id,
       handleName: payload.handleName,
-      params: payload.params,
       ret,
     } as XpcPayload);
   });

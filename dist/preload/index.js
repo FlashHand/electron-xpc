@@ -41,7 +41,6 @@ var handle = (handleName, handler) => {
     electron.ipcRenderer.send(XPC_FINISH, {
       id: payload.id,
       handleName: payload.handleName,
-      params: payload.params,
       ret
     });
   });

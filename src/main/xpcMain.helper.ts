@@ -146,10 +146,11 @@ export function createUtilityProcess(options: UtilityProcessOptions): XpcUtility
       // The reply MUST carry payload.id — the id minted inside the utility
       // process. execAs() mints a different id for its own downstream leg; using
       // that one would never match the utility's pending task and the caller's
-      // send() would stay parked forever.
+      // send() would stay parked forever. No `params`: the utility reads only id and ret
+      // (docs/issues/finish-echoes-params.md).
       port2.postMessage({
         type: XPC_FINISH,
-        payload: { ...payload, ret: ret ?? null } as XpcPayload,
+        payload: { id: payload.id, handleName: payload.handleName, ret: ret ?? null } as XpcPayload,
       });
     }
 

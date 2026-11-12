@@ -162,7 +162,6 @@ var XpcUtilityProcess = class {
           payload: {
             id: payload.id,
             handleName: payload.handleName,
-            params: payload.params,
             ret
           }
         });

@@ -606,6 +606,16 @@ Main Process (xpcMain)
 
 ---
 
+## Changes in 1.3.1
+
+A task result no longer carries the request's `params` back. Every receiver read only `id` and `ret`, and
+main had to decode the echoed copy: a large write through main (for example a renderer saving into a SQLite
+window) cost main's thread about 1.5 times what it needed (measured: 3.44 → 2.19 ms per MB). Return data travels in the handler's return value,
+as before. Handler signatures, emitter types and `send()` results are unchanged, and 1.3.1 interoperates with
+older peers in both directions. 1.3.0 was not published to npm; 1.3.1 includes its changes.
+
+---
+
 ## Changes in 1.3.0
 
 Main-process handlers can read their caller with `getXpcCaller()`, and `isMainFrameCaller()` checks a

@@ -140,7 +140,7 @@ function createUtilityProcess(options) {
       const ret = await xpcCenter.execAs({ type: "utility", portId }, payload.handleName, payload.params);
       port2.postMessage({
         type: XPC_FINISH,
-        payload: { ...payload, ret: ret ?? null }
+        payload: { id: payload.id, handleName: payload.handleName, ret: ret ?? null }
       });
     }
     if (type === XPC_FINISH && payload) {

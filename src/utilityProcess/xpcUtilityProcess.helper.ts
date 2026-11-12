@@ -202,13 +202,13 @@ class XpcUtilityProcess implements XpcUtilityProcessApi {
           }
         }
 
-        // Send result back to main process
+        // Send result back to main process. No `params`: main reads only id and ret
+        // (docs/issues/finish-echoes-params.md).
         this.port?.postMessage({
           type: XPC_FINISH,
           payload: {
             id: payload.id,
             handleName: payload.handleName,
-            params: payload.params,
             ret,
           } as XpcPayload,
         });

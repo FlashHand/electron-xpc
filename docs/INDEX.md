@@ -15,7 +15,7 @@ Type-safe, async/await cross-process communication for Electron across four proc
 | Doc | Status |
 |---|---|
 | [features/utility-xpc-full-duplex.md](features/utility-xpc-full-duplex.md) | delivered in `1.2.0` |
-| [features/caller-context.md](features/caller-context.md) | implemented for `1.3.0`; T13 and release pending |
+| [features/caller-context.md](features/caller-context.md) | implemented for `1.3.0`, published in `1.3.1` (1.3.0 never reached npm); T13 harness run pending |
 
 ## Issues
 
@@ -26,6 +26,7 @@ Type-safe, async/await cross-process communication for Electron across four proc
 | [issues/utility-exit-leaves-stale-routes.md](issues/utility-exit-leaves-stale-routes.md) | 已修复 — xpc-004, `1.2.0` |
 | [issues/create-utility-process-drops-fork-options.md](issues/create-utility-process-drops-fork-options.md) | 已修复 — `1.2.0` |
 | [issues/renderer-register-overrides-main-handler.md](issues/renderer-register-overrides-main-handler.md) | 待定 — found in xpc-007 review |
+| [issues/finish-echoes-params.md](issues/finish-echoes-params.md) | 已修复 — `1.3.1` |
 
 ## Delivery
 

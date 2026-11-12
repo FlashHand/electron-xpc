@@ -84,7 +84,7 @@ bundles must not pull in main-process code. Values are the contract.
 | `XPC_EXEC` | `__xpc_exec__` | renderer→main (`invoke`), utility→main (port) | request invocation |
 | *forward* | `exec` | main→utility (port) | forwarded invocation |
 | *forward* | `<handleName>` | main→renderer (`webContents.send`) | forwarded invocation |
-| `XPC_FINISH` | `__xpc_finish__` | renderer→main, utility↔main | deliver a task result |
+| `XPC_FINISH` | `__xpc_finish__` | renderer→main, utility↔main | deliver a task result: `id`, `handleName`, `ret` — never the request `params` ([issue](../issues/finish-echoes-params.md)) |
 | `XPC_SUBSCRIBE` | `__xpc_subscribe__` | renderer→main, utility→main | add self as subscriber |
 | `XPC_BROADCAST` | `__xpc_broadcast__` | renderer→main, utility→main | ask the router to fan out |
 | `XPC_BROADCAST_DISPATCH` | `__xpc_broadcast_dispatch__` | main→renderer, main→utility | fan-out delivery |

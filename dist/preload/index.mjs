@@ -39,7 +39,6 @@ var handle = (handleName, handler) => {
     ipcRenderer.send(XPC_FINISH, {
       id: payload.id,
       handleName: payload.handleName,
-      params: payload.params,
       ret
     });
   });
